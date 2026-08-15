@@ -13,6 +13,8 @@
 const GH_API = "https://api.github.com";
 const LS_TOKEN_KEY = "repohub_token";
 const LS_ACTIVITY_KEY = "repohub_activity";
+const LS_FAVORITES_KEY = "repohub_favorites";
+const LS_THEME_KEY = "repohub_theme";
 const ALLOWED_HOSTS = new Set(["github.com", "api.github.com", "raw.githubusercontent.com", "githubusercontent.com"]);
 
 const state = {
@@ -20,6 +22,7 @@ const state = {
   user: null,
   tokenScopes: [],
   repos: [],
+  favorites: [],
   activity: [],
   stagedFiles: [], // { path, file, size }
   uploadInProgress: false,
@@ -33,10 +36,24 @@ const state = {
     items: [],
     loading: false,
   },
+  bulkUpload: {
+    enabled: false,
+    selectedRepos: [],
+  },
   issues: {
     repoFullName: "",
     state: "open",
     items: [],
+  },
+  repoDetail: {
+    repoFullName: "",
+    readme: null,
+    commits: [],
+    branches: [],
+  },
+  collaborate: {
+    repoFullName: "",
+    activeTab: "pulls",
   },
 };
 
@@ -236,11 +253,66 @@ function clearActivityLog() {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Favorites / pinned repos (persisted locally)                          */
+/* ---------------------------------------------------------------------- */
+
+function loadFavorites() {
+  try {
+    state.favorites = JSON.parse(localStorage.getItem(LS_FAVORITES_KEY) || "[]");
+  } catch { state.favorites = []; }
+}
+function saveFavorites() {
+  try {
+    localStorage.setItem(LS_FAVORITES_KEY, JSON.stringify(state.favorites));
+  } catch { /* storage unavailable — ignore */ }
+}
+function isFavorite(fullName) {
+  return state.favorites.includes(fullName);
+}
+function toggleFavorite(fullName) {
+  if (isFavorite(fullName)) {
+    state.favorites = state.favorites.filter((f) => f !== fullName);
+    toast("Removed from pinned repos", "info", 1800);
+  } else {
+    state.favorites.unshift(fullName);
+    toast("Pinned to top of dashboard", "success", 1800);
+  }
+  saveFavorites();
+  renderRepoGrid();
+  renderDashRecentRepos();
+}
+
+/* ---------------------------------------------------------------------- */
+/* Theme (light / dark)                                                   */
+/* ---------------------------------------------------------------------- */
+
+function loadTheme() {
+  let saved;
+  try { saved = localStorage.getItem(LS_THEME_KEY); } catch { saved = null; }
+  applyTheme(saved === "light" ? "light" : "dark");
+}
+function applyTheme(theme) {
+  document.documentElement.classList.toggle("theme-light", theme === "light");
+  try { localStorage.setItem(LS_THEME_KEY, theme); } catch {}
+  const icon = $("#themeToggleIcon");
+  if (icon) icon.innerHTML = theme === "light"
+    ? `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>`
+    : `<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>`;
+}
+function toggleTheme() {
+  const isLight = document.documentElement.classList.contains("theme-light");
+  applyTheme(isLight ? "dark" : "light");
+}
+
+/* ---------------------------------------------------------------------- */
 /* GitHub API wrapper                                                     */
 /* ---------------------------------------------------------------------- */
 
 async function ghFetch(path, options = {}) {
   if (!state.token) throw new Error("Not connected to GitHub");
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    throw new Error("You're offline. This will retry automatically once reconnected.");
+  }
   let res;
   try {
     res = await fetch(`${GH_API}${path}`, {
@@ -389,6 +461,7 @@ async function onConnected(silent = false) {
   await refreshRepos();
   renderDashboard();
   renderSecurityInfo();
+  refreshNotificationBadge();
   if (!silent) switchView("dashboard");
 }
 
@@ -446,6 +519,9 @@ function renderAuthUI() {
   $("#issuesGate").classList.toggle("hidden", connected);
   $("#issuesContent").classList.toggle("hidden", !connected);
 
+  $("#collaborateGate").classList.toggle("hidden", connected);
+  $("#collaborateContent").classList.toggle("hidden", !connected);
+
   if (connected) {
     $("#welcomeText").textContent = `Welcome, ${(state.user.name || state.user.login).split(" ")[0]} 👋`;
   }
@@ -501,6 +577,9 @@ function switchView(viewName) {
   if (viewName === "issues" && state.token) {
     populateIssuesRepoSelect();
   }
+  if (viewName === "collaborate" && state.token) {
+    populateCollabRepoSelect();
+  }
 }
 
 function closeMobileMenu() {
@@ -537,18 +616,46 @@ function populateRepoSelect() {
   sel.innerHTML = `<option value="">— select repository —</option>` +
     state.repos.map((r) => `<option value="${escapeAttr(r.full_name)}">${escapeHtml(r.full_name)}${r.private ? " (private)" : ""}</option>`).join("");
   if (currentVal && state.repos.some((r) => r.full_name === currentVal)) sel.value = currentVal;
+
+  const checklist = $("#bulkRepoChecklist");
+  if (checklist) {
+    checklist.innerHTML = state.repos.map((r) => `
+      <label class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.04] cursor-pointer text-xs">
+        <input type="checkbox" class="bulkRepoCheck w-3.5 h-3.5 rounded accent-hub-teal" value="${escapeAttr(r.full_name)}" ${state.bulkUpload.selectedRepos.includes(r.full_name) ? "checked" : ""}>
+        <span class="font-mono truncate">${escapeHtml(r.full_name)}</span>
+      </label>
+    `).join("");
+    $all(".bulkRepoCheck", checklist).forEach((cb) => {
+      cb.onchange = () => {
+        if (cb.checked) {
+          if (!state.bulkUpload.selectedRepos.includes(cb.value)) state.bulkUpload.selectedRepos.push(cb.value);
+        } else {
+          state.bulkUpload.selectedRepos = state.bulkUpload.selectedRepos.filter((r) => r !== cb.value);
+        }
+      };
+    });
+  }
 }
 
 function repoCardHtml(repo) {
   const safeHtmlUrl = safeExternalUrl(repo.html_url);
+  const pinned = isFavorite(repo.full_name);
   return `
-    <div class="repo-card rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5 flex flex-col" data-repo="${escapeAttr(repo.full_name)}">
+    <div class="repo-card rounded-2xl border ${pinned ? "border-hub-amber/40" : "border-hub-line"} bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5 flex flex-col" data-repo="${escapeAttr(repo.full_name)}">
       <div class="flex items-start justify-between gap-2 mb-2">
-        <div class="min-w-0">
-          <h3 class="font-mono font-semibold text-sm truncate">${escapeHtml(repo.name)}</h3>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5">
+            ${pinned ? `<svg class="w-3.5 h-3.5 text-hub-amber shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.2H22l-6 4.6 2.4 7.2L12 16.4 5.6 21l2.4-7.2-6-4.6h7.6z"/></svg>` : ""}
+            <h3 class="font-mono font-semibold text-sm truncate">${escapeHtml(repo.name)}</h3>
+          </div>
           <p class="text-[11px] text-hub-dim font-mono truncate">${escapeHtml(repo.full_name)}</p>
         </div>
-        <span class="badge ${repo.private ? "badge-private" : "badge-public"} shrink-0">${repo.private ? "Private" : "Public"}</span>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button class="btnRepoPin w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/[0.08] transition-all ${pinned ? "text-hub-amber" : "text-hub-dim"}" data-repo="${escapeAttr(repo.full_name)}" aria-label="${pinned ? "Unpin" : "Pin"} repository" title="${pinned ? "Unpin" : "Pin to top"}">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="${pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.6 2.4 7.2L12 16.4 5.6 21l2.4-7.2-6-4.6h7.6z"/></svg>
+          </button>
+          <span class="badge ${repo.private ? "badge-private" : "badge-public"}">${repo.private ? "Private" : "Public"}</span>
+        </div>
       </div>
       <p class="text-xs text-hub-dim line-clamp-2 mb-3 flex-1 min-h-[2.2em]">${repo.description ? escapeHtml(repo.description) : "No description provided."}</p>
       <div class="flex items-center gap-3 text-[11px] font-mono text-hub-dim mb-4 flex-wrap">
@@ -557,14 +664,16 @@ function repoCardHtml(repo) {
           <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.2H22l-6 4.6 2.4 7.2L12 16.4 5.6 21l2.4-7.2-6-4.6h7.6z"/></svg>
           ${repo.stargazers_count}
         </span>
+        <span class="flex items-center gap-1">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>
+          ${repo.forks_count ?? 0}
+        </span>
         <span>Updated ${timeAgo(repo.updated_at)}</span>
       </div>
       <div class="flex items-center gap-2 mt-auto">
+        <button class="btnRepoDetail flex-1 text-center text-xs font-medium bg-hub-amber/10 text-hub-amber border border-hub-amber/30 rounded-lg py-2 hover:bg-hub-amber/20 transition-all" data-repo="${escapeAttr(repo.full_name)}">Overview</button>
         <button class="btnRepoExplore flex-1 text-center text-xs font-medium bg-hub-violet/10 text-hub-violet border border-hub-violet/30 rounded-lg py-2 hover:bg-hub-violet/20 transition-all" data-repo="${escapeAttr(repo.full_name)}">Explore</button>
         <button class="btnRepoUpload text-xs font-medium bg-hub-teal/10 text-hub-teal border border-hub-teal/30 rounded-lg py-2 px-3 hover:bg-hub-teal/20 transition-all" data-repo="${escapeAttr(repo.full_name)}">Upload</button>
-        <a href="${safeHtmlUrl}" target="_blank" rel="noopener noreferrer" class="w-8 h-8 flex items-center justify-center rounded-lg border border-hub-line hover:bg-white/[0.09] transition-all shrink-0" aria-label="Open on GitHub">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
-        </a>
         <button class="btnRepoMore w-8 h-8 flex items-center justify-center rounded-lg border border-hub-line hover:bg-white/[0.09] transition-all shrink-0" data-repo="${escapeAttr(repo.full_name)}" aria-label="More options">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.2" fill="currentColor" stroke="none"/></svg>
         </button>
@@ -586,6 +695,13 @@ function renderRepoGrid() {
   else if (sortMode === "stars") list = [...list].sort((a, b) => b.stargazers_count - a.stargazers_count);
   else list = [...list].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
 
+  // Pinned repos always float to the top, preserving the sort order within each group.
+  list = [...list].sort((a, b) => {
+    const aPin = isFavorite(a.full_name) ? 0 : 1;
+    const bPin = isFavorite(b.full_name) ? 0 : 1;
+    return aPin - bPin;
+  });
+
   if (list.length === 0) {
     grid.innerHTML = "";
     empty.classList.remove("hidden");
@@ -606,15 +722,29 @@ function renderRepoGrid() {
       openRepoInExplorer(btn.dataset.repo);
     };
   });
+  $all(".btnRepoDetail", grid).forEach((btn) => {
+    btn.onclick = () => openRepoDetailModal(btn.dataset.repo);
+  });
   $all(".btnRepoMore", grid).forEach((btn) => {
     btn.onclick = () => openRepoOptionsModal(btn.dataset.repo);
+  });
+  $all(".btnRepoPin", grid).forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      toggleFavorite(btn.dataset.repo);
+    };
   });
 }
 
 function renderDashRecentRepos() {
   const wrap = $("#dashRecentRepos");
   if (!wrap) return;
-  const recent = [...state.repos].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 5);
+  const pinned = state.repos.filter((r) => isFavorite(r.full_name));
+  const rest = [...state.repos]
+    .filter((r) => !isFavorite(r.full_name))
+    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  const recent = [...pinned, ...rest].slice(0, 5);
+
   if (recent.length === 0) {
     wrap.innerHTML = `<div class="p-6 text-center text-sm text-hub-dim">No repositories yet.</div>`;
     return;
@@ -627,7 +757,10 @@ function renderDashRecentRepos() {
         </svg>
       </div>
       <div class="min-w-0 flex-1">
-        <p class="text-sm font-medium truncate font-mono">${escapeHtml(r.name)}</p>
+        <p class="text-sm font-medium truncate font-mono flex items-center gap-1.5">
+          ${isFavorite(r.full_name) ? `<svg class="w-3 h-3 text-hub-amber shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.2H22l-6 4.6 2.4 7.2L12 16.4 5.6 21l2.4-7.2-6-4.6h7.6z"/></svg>` : ""}
+          <span class="truncate">${escapeHtml(r.name)}</span>
+        </p>
         <p class="text-[11px] text-hub-dim">Updated ${timeAgo(r.updated_at)}</p>
       </div>
       <svg class="w-4 h-4 text-hub-dim shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
@@ -635,10 +768,7 @@ function renderDashRecentRepos() {
   `).join("");
 
   $all(".dashRepoRow", wrap).forEach((row) => {
-    row.onclick = () => {
-      switchView("explorer");
-      openRepoInExplorer(row.dataset.repo);
-    };
+    row.onclick = () => openRepoDetailModal(row.dataset.repo);
   });
 }
 
@@ -690,6 +820,13 @@ function openNewRepoModal() {
           <input id="newRepoInitReadme" type="checkbox" checked class="w-4 h-4 rounded accent-hub-teal">
           Initialize with a README
         </label>
+        <div>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">.gitignore template (optional)</label>
+          <select id="newRepoGitignore" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
+            <option value="">None</option>
+            ${Object.keys(GITIGNORE_TEMPLATES).map((k) => `<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join("")}
+          </select>
+        </div>
       </div>
       <button id="btnCreateRepoSubmit" type="button" class="w-full mt-6 flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-hub-teal/20">
         <span id="createRepoBtnText">Create Repository</span>
@@ -733,6 +870,24 @@ function openNewRepoModal() {
               auto_init: $("#newRepoInitReadme", root).checked,
             }),
           });
+
+          const gitignoreKey = $("#newRepoGitignore", root).value;
+          if (gitignoreKey && GITIGNORE_TEMPLATES[gitignoreKey]) {
+            try {
+              await ghFetch(`/repos/${repo.full_name}/contents/.gitignore`, {
+                method: "PUT",
+                body: JSON.stringify({
+                  message: "Add .gitignore via RepoHub",
+                  content: utf8ToBase64(GITIGNORE_TEMPLATES[gitignoreKey]),
+                  branch: repo.default_branch || "main",
+                }),
+              });
+            } catch {
+              // Non-fatal — repo was still created successfully even if this follow-up commit fails
+              // (e.g. auto_init was off so there's no default branch yet to commit onto).
+            }
+          }
+
           logActivity("repo_create", `Repository created: ${repo.name}`, isPrivate ? "Private" : "Public");
           toast(`Repository "${repo.name}" created successfully`, "success");
           closeModal();
@@ -882,6 +1037,269 @@ function openDeleteConfirmModal(repo) {
         }
       };
     },
+  });
+}
+
+/* ---------------------------------------------------------------------- */
+/* Repo Detail modal: README preview, commit history, star/fork, branches */
+/* ---------------------------------------------------------------------- */
+
+async function openRepoDetailModal(fullName) {
+  const repo = state.repos.find((r) => r.full_name === fullName);
+  if (!repo) return;
+  state.repoDetail.repoFullName = fullName;
+
+  const pinned = isFavorite(fullName);
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-start justify-between gap-3 mb-4">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <h2 class="font-mono font-bold text-lg truncate">${escapeHtml(repo.name)}</h2>
+            <span class="badge ${repo.private ? "badge-private" : "badge-public"} shrink-0">${repo.private ? "Private" : "Public"}</span>
+          </div>
+          <p class="text-xs text-hub-dim font-mono truncate mt-0.5">${escapeHtml(repo.full_name)}</p>
+        </div>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2 mb-5 flex-wrap">
+        <button id="btnDetailStar" type="button" class="flex items-center gap-1.5 border border-hub-line px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-white/[0.05] transition-all">
+          <svg id="detailStarIcon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.6 2.4 7.2L12 16.4 5.6 21l2.4-7.2-6-4.6h7.6z"/></svg>
+          <span id="detailStarText">Star</span>
+          <span class="text-hub-dim">${repo.stargazers_count}</span>
+        </button>
+        <button id="btnDetailFork" type="button" class="flex items-center gap-1.5 border border-hub-line px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-white/[0.05] transition-all">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>
+          Fork
+          <span class="text-hub-dim">${repo.forks_count ?? 0}</span>
+        </button>
+        <button id="btnDetailPin" type="button" class="flex items-center gap-1.5 border ${pinned ? "border-hub-amber/40 text-hub-amber" : "border-hub-line"} px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-white/[0.05] transition-all">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="${pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.6 2.4 7.2L12 16.4 5.6 21l2.4-7.2-6-4.6h7.6z"/></svg>
+          ${pinned ? "Pinned" : "Pin"}
+        </button>
+        <a href="${safeExternalUrl(repo.html_url)}" target="_blank" rel="noopener noreferrer" class="flex items-center gap-1.5 border border-hub-line px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-white/[0.05] transition-all ml-auto">
+          GitHub
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 17L17 7M7 7h10v10"/></svg>
+        </a>
+      </div>
+
+      <div class="flex items-center gap-1 border-b border-hub-line mb-4 overflow-x-auto">
+        <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-hub-teal text-hub-teal whitespace-nowrap" data-tab="readme">README</button>
+        <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="commits">Commits</button>
+        <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="branches">Branches</button>
+      </div>
+
+      <div id="detailTabReadme" class="detailTabPanel">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+      <div id="detailTabCommits" class="detailTabPanel hidden">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+      <div id="detailTabBranches" class="detailTabPanel hidden">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+    </div>
+  `;
+
+  openModal(html, {
+    wide: true,
+    onMount: async (root) => {
+      $("#mClose", root).onclick = closeModal;
+
+      $all(".detailTab", root).forEach((tab) => {
+        tab.onclick = () => {
+          $all(".detailTab", root).forEach((t) => {
+            t.classList.remove("border-hub-teal", "text-hub-teal");
+            t.classList.add("border-transparent", "text-hub-dim");
+          });
+          tab.classList.remove("border-transparent", "text-hub-dim");
+          tab.classList.add("border-hub-teal", "text-hub-teal");
+          $all(".detailTabPanel", root).forEach((p) => p.classList.add("hidden"));
+          $(`#detailTab${capitalize(tab.dataset.tab)}`, root).classList.remove("hidden");
+        };
+      });
+
+      // Star toggle
+      let starred = null; // unknown until checked
+      const starBtn = $("#btnDetailStar", root);
+      const starIcon = $("#detailStarIcon", root);
+      const starText = $("#detailStarText", root);
+      try {
+        await ghFetch(`/user/starred/${repo.full_name}`);
+        starred = true;
+      } catch {
+        starred = false;
+      }
+      updateStarButton();
+      function updateStarButton() {
+        starIcon.setAttribute("fill", starred ? "currentColor" : "none");
+        starBtn.classList.toggle("text-hub-amber", starred);
+        starBtn.classList.toggle("border-hub-amber/40", starred);
+        starText.textContent = starred ? "Starred" : "Star";
+      }
+      starBtn.onclick = async () => {
+        starBtn.disabled = true;
+        try {
+          await ghFetch(`/user/starred/${repo.full_name}`, { method: starred ? "DELETE" : "PUT" });
+          starred = !starred;
+          updateStarButton();
+          toast(starred ? "Repository starred" : "Star removed", "success", 1800);
+        } catch (err) {
+          toast(err.message, "error");
+        } finally {
+          starBtn.disabled = false;
+        }
+      };
+
+      // Fork
+      $("#btnDetailFork", root).onclick = async () => {
+        const btn = $("#btnDetailFork", root);
+        btn.disabled = true;
+        try {
+          await ghFetch(`/repos/${repo.full_name}/forks`, { method: "POST" });
+          toast(`Forking "${repo.name}" — it will appear in your repos shortly`, "success", 4000);
+          logActivity("repo_create", `Forked repository: ${repo.name}`, repo.full_name);
+        } catch (err) {
+          toast(err.message, "error");
+        } finally {
+          btn.disabled = false;
+        }
+      };
+
+      // Pin
+      $("#btnDetailPin", root).onclick = () => {
+        toggleFavorite(repo.full_name);
+        closeModal();
+        openRepoDetailModal(fullName);
+      };
+
+      await loadReadmeInto(root, repo);
+      await loadCommitsInto(root, repo);
+      await loadBranchesInto(root, repo);
+    },
+  });
+}
+
+async function loadReadmeInto(root, repo) {
+  const panel = $("#detailTabReadme", root);
+  try {
+    const data = await ghFetch(`/repos/${repo.full_name}/readme`);
+    const decoded = data.content ? base64ToUtf8(data.content) : null;
+    if (decoded === null) {
+      panel.innerHTML = `<p class="text-sm text-hub-dim text-center py-6">README could not be decoded.</p>`;
+      return;
+    }
+    panel.innerHTML = `<div class="bg-white/[0.02] border border-hub-line rounded-xl p-4 max-h-80 overflow-y-auto">
+      <pre class="text-xs text-hub-ink whitespace-pre-wrap font-sans leading-relaxed">${escapeHtml(decoded.slice(0, 8000))}${decoded.length > 8000 ? "\n\n… truncated, view full file on GitHub …" : ""}</pre>
+    </div>`;
+  } catch {
+    panel.innerHTML = `<p class="text-sm text-hub-dim text-center py-6">No README found in this repository.</p>`;
+  }
+}
+
+async function loadCommitsInto(root, repo) {
+  const panel = $("#detailTabCommits", root);
+  try {
+    const commits = await ghFetch(`/repos/${repo.full_name}/commits?per_page=20`);
+    if (!commits || commits.length === 0) {
+      panel.innerHTML = `<p class="text-sm text-hub-dim text-center py-6">No commits found.</p>`;
+      return;
+    }
+    panel.innerHTML = `<div class="space-y-2 max-h-80 overflow-y-auto pr-1">` + commits.map((c) => {
+      const msg = (c.commit?.message || "").split("\n")[0];
+      const author = c.commit?.author?.name || c.author?.login || "unknown";
+      const date = c.commit?.author?.date || c.commit?.committer?.date;
+      const shortSha = (c.sha || "").slice(0, 7);
+      return `
+        <a href="${safeExternalUrl(c.html_url)}" target="_blank" rel="noopener noreferrer" class="flex items-start gap-3 p-3 rounded-xl border border-hub-line bg-white/[0.02] hover:bg-white/[0.04] transition-all">
+          <img src="${escapeAttr(c.author?.avatar_url || "")}" alt="" class="w-7 h-7 rounded-full shrink-0 mt-0.5" onerror="this.style.visibility='hidden'">
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-medium truncate">${escapeHtml(msg)}</p>
+            <p class="text-[11px] text-hub-dim mt-0.5 font-mono">${escapeHtml(author)} · ${date ? timeAgo(date) : ""} · <span class="text-hub-cyan">${escapeHtml(shortSha)}</span></p>
+          </div>
+        </a>
+      `;
+    }).join("") + `</div>`;
+  } catch (err) {
+    panel.innerHTML = `<p class="text-sm text-hub-coral text-center py-6">Failed to load commits: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function loadBranchesInto(root, repo) {
+  const panel = $("#detailTabBranches", root);
+  try {
+    const branches = await ghFetch(`/repos/${repo.full_name}/branches?per_page=100`);
+    panel.innerHTML = `
+      <div class="flex items-center gap-2 mb-3">
+        <input id="newBranchName" type="text" placeholder="new-branch-name" autocomplete="off" spellcheck="false" class="flex-1 bg-hub-deep border border-hub-line rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        <button id="btnCreateBranch" type="button" class="flex items-center gap-1.5 bg-hub-teal text-hub-bg font-semibold px-3 py-2 rounded-lg text-xs hover:brightness-110 transition-all shrink-0">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+          Create
+        </button>
+      </div>
+      <div id="branchListWrap" class="space-y-1.5 max-h-64 overflow-y-auto"></div>
+    `;
+    renderBranchList(root, repo, branches);
+
+    $("#btnCreateBranch", root).onclick = async () => {
+      const nameInput = $("#newBranchName", root);
+      const name = nameInput.value.trim();
+      if (!name) { toast("Enter a branch name", "error"); return; }
+      if (!/^[a-zA-Z0-9._\/-]+$/.test(name)) { toast("Branch name contains invalid characters", "error"); return; }
+      const btn = $("#btnCreateBranch", root);
+      btn.disabled = true;
+      try {
+        const base = branches.find((b) => b.name === repo.default_branch) || branches[0];
+        if (!base) throw new Error("Could not determine a base branch");
+        const refData = await ghFetch(`/repos/${repo.full_name}/git/ref/heads/${encodeURIComponent(base.name)}`);
+        await ghFetch(`/repos/${repo.full_name}/git/refs`, {
+          method: "POST",
+          body: JSON.stringify({ ref: `refs/heads/${name}`, sha: refData.object.sha }),
+        });
+        toast(`Branch "${name}" created`, "success");
+        nameInput.value = "";
+        const updated = await ghFetch(`/repos/${repo.full_name}/branches?per_page=100`);
+        renderBranchList(root, repo, updated);
+      } catch (err) {
+        toast(err.message, "error");
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  } catch (err) {
+    panel.innerHTML = `<p class="text-sm text-hub-coral text-center py-6">Failed to load branches: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderBranchList(root, repo, branches) {
+  const wrap = $("#branchListWrap", root);
+  if (!wrap) return;
+  wrap.innerHTML = branches.map((b) => `
+    <div class="flex items-center gap-2.5 p-2.5 rounded-lg border border-hub-line bg-white/[0.02]">
+      <svg class="w-3.5 h-3.5 text-hub-dim shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>
+      <span class="text-xs font-mono flex-1 truncate">${escapeHtml(b.name)}</span>
+      ${b.name === repo.default_branch ? `<span class="badge badge-open">default</span>` : `<button type="button" class="btnDeleteBranch text-hub-dim hover:text-hub-coral transition-colors shrink-0" data-branch="${escapeAttr(b.name)}" aria-label="Delete branch"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`}
+    </div>
+  `).join("");
+
+  $all(".btnDeleteBranch", wrap).forEach((btn) => {
+    btn.onclick = async () => {
+      const branchName = btn.dataset.branch;
+      if (!confirm(`Delete branch "${branchName}"? This cannot be undone.`)) return;
+      btn.disabled = true;
+      try {
+        await ghFetch(`/repos/${repo.full_name}/git/refs/heads/${encodeURIComponent(branchName)}`, { method: "DELETE" });
+        toast(`Branch "${branchName}" deleted`, "success");
+        const updated = await ghFetch(`/repos/${repo.full_name}/branches?per_page=100`);
+        renderBranchList(root, repo, updated);
+      } catch (err) {
+        toast(err.message, "error");
+        btn.disabled = false;
+      }
+    };
   });
 }
 
@@ -1581,6 +1999,568 @@ async function loadCommentsInto(root, issue) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* COLLABORATE: Pull Requests, Collaborators, Actions, Webhooks           */
+/* ---------------------------------------------------------------------- */
+
+function populateCollabRepoSelect() {
+  const sel = $("#collabRepoSelect");
+  if (!sel) return;
+  const currentVal = sel.value;
+  sel.innerHTML = `<option value="">— select repository —</option>` +
+    state.repos.map((r) => `<option value="${escapeAttr(r.full_name)}">${escapeHtml(r.full_name)}${r.private ? " (private)" : ""}</option>`).join("");
+  if (currentVal && state.repos.some((r) => r.full_name === currentVal)) sel.value = currentVal;
+  else if (state.collaborate.repoFullName) sel.value = state.collaborate.repoFullName;
+}
+
+function switchCollabTab(tabName) {
+  state.collaborate.activeTab = tabName;
+  $all(".collabTab").forEach((t) => {
+    const active = t.dataset.tab === tabName;
+    t.classList.toggle("border-hub-teal", active);
+    t.classList.toggle("text-hub-teal", active);
+    t.classList.toggle("border-transparent", !active);
+    t.classList.toggle("text-hub-dim", !active);
+  });
+  $all(".collabPanel").forEach((p) => p.classList.add("hidden"));
+  const panelMap = { pulls: "collabPanelPulls", collabs: "collabPanelCollabs", actions: "collabPanelActions", webhooks: "collabPanelWebhooks" };
+  $(`#${panelMap[tabName]}`).classList.remove("hidden");
+  loadCollabTabData(tabName);
+}
+
+async function onCollabRepoSelected(fullName) {
+  state.collaborate.repoFullName = fullName;
+  if (!fullName) return;
+  await loadCollabTabData(state.collaborate.activeTab);
+}
+
+async function loadCollabTabData(tabName) {
+  const repoFullName = state.collaborate.repoFullName;
+  if (tabName === "pulls") return loadPullRequests(repoFullName);
+  if (tabName === "collabs") return loadCollaborators(repoFullName);
+  if (tabName === "actions") return loadWorkflowRuns(repoFullName);
+  if (tabName === "webhooks") return loadWebhooks(repoFullName);
+}
+
+/* --- Pull Requests --- */
+
+async function loadPullRequests(repoFullName) {
+  const emptyEl = $("#collabPullsEmpty");
+  const listEl = $("#collabPullsList");
+  if (!repoFullName) {
+    emptyEl.classList.remove("hidden");
+    listEl.classList.add("hidden");
+    emptyEl.innerHTML = `<p class="text-sm text-hub-dim">Select a repository to view pull requests.</p>`;
+    return;
+  }
+  emptyEl.classList.remove("hidden");
+  listEl.classList.add("hidden");
+  emptyEl.innerHTML = `<div class="flex items-center justify-center py-4"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>`;
+  try {
+    const prs = await ghFetch(`/repos/${repoFullName}/pulls?state=open&per_page=30`);
+    if (!prs || prs.length === 0) {
+      emptyEl.innerHTML = `<p class="text-sm text-hub-dim">No open pull requests for this repository.</p>`;
+      return;
+    }
+    emptyEl.classList.add("hidden");
+    listEl.classList.remove("hidden");
+    listEl.innerHTML = prs.map((pr, idx) => `
+      <div class="issue-row flex items-start gap-3 p-4 cursor-pointer" data-idx="${idx}">
+        <div class="w-8 h-8 rounded-lg bg-hub-cyan/15 flex items-center justify-center shrink-0 mt-0.5">
+          <svg class="w-4 h-4 text-hub-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium truncate">${escapeHtml(pr.title)}</p>
+          <p class="text-xs text-hub-dim mt-0.5">#${pr.number} by ${escapeHtml(pr.user?.login || "unknown")} · ${timeAgo(pr.created_at)} · <span class="font-mono text-hub-violet">${escapeHtml(pr.head?.ref || "?")}</span> → <span class="font-mono text-hub-teal">${escapeHtml(pr.base?.ref || "?")}</span></p>
+        </div>
+        ${pr.draft ? `<span class="badge badge-closed shrink-0">draft</span>` : `<span class="badge badge-open shrink-0">open</span>`}
+      </div>
+    `).join("");
+    $all(".issue-row", listEl).forEach((row) => {
+      row.onclick = () => openPullRequestModal(repoFullName, prs[Number(row.dataset.idx)]);
+    });
+  } catch (err) {
+    emptyEl.innerHTML = `<p class="text-sm text-hub-coral">Failed to load pull requests: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function openPullRequestModal(repoFullName, pr) {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-start justify-between gap-3 mb-4">
+        <div class="min-w-0">
+          <h2 class="font-mono font-bold text-base leading-snug">${escapeHtml(pr.title)}</h2>
+          <p class="text-xs text-hub-dim mt-1">#${pr.number} · <span class="font-mono text-hub-violet">${escapeHtml(pr.head?.ref || "?")}</span> → <span class="font-mono text-hub-teal">${escapeHtml(pr.base?.ref || "?")}</span> · opened ${timeAgo(pr.created_at)} by ${escapeHtml(pr.user?.login || "unknown")}</p>
+        </div>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="bg-white/[0.02] border border-hub-line rounded-xl p-4 mb-4 max-h-56 overflow-y-auto">
+        <p class="text-sm text-hub-ink whitespace-pre-wrap leading-relaxed">${pr.body ? escapeHtml(pr.body) : '<span class="text-hub-dim italic">No description provided.</span>'}</p>
+      </div>
+      <div class="flex gap-3">
+        <button id="btnMergePR" type="button" class="flex-1 flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3 rounded-xl hover:brightness-110 transition-all text-sm">
+          <span id="mergePRText">Merge Pull Request</span>
+        </button>
+        <button id="btnClosePR" type="button" class="flex-1 border border-hub-coral/30 text-hub-coral py-3 rounded-xl text-sm font-medium hover:bg-hub-coral/10 transition-all">
+          Close without merging
+        </button>
+      </div>
+      <a href="${safeExternalUrl(pr.html_url)}" target="_blank" rel="noopener noreferrer" class="mt-3 flex items-center justify-center gap-1.5 text-xs text-hub-dim hover:text-hub-teal transition-colors">
+        Review full diff on GitHub
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 17L17 7M7 7h10v10"/></svg>
+      </a>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      $("#btnMergePR", root).onclick = async () => {
+        if (!confirm(`Merge pull request #${pr.number} into ${pr.base?.ref}?`)) return;
+        const btn = $("#btnMergePR", root);
+        const btnText = $("#mergePRText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+        try {
+          await ghFetch(`/repos/${repoFullName}/pulls/${pr.number}/merge`, { method: "PUT" });
+          logActivity("issue_close", `Pull request merged: ${pr.title}`, `${repoFullName} #${pr.number}`);
+          toast(`Pull request #${pr.number} merged`, "success");
+          closeModal();
+          await loadPullRequests(repoFullName);
+          await refreshRepos();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+          btnText.textContent = "Merge Pull Request";
+        }
+      };
+      $("#btnClosePR", root).onclick = async () => {
+        const btn = $("#btnClosePR", root);
+        btn.disabled = true;
+        try {
+          await ghFetch(`/repos/${repoFullName}/pulls/${pr.number}`, {
+            method: "PATCH",
+            body: JSON.stringify({ state: "closed" }),
+          });
+          logActivity("issue_close", `Pull request closed: ${pr.title}`, `${repoFullName} #${pr.number}`);
+          toast(`Pull request #${pr.number} closed`, "success");
+          closeModal();
+          await loadPullRequests(repoFullName);
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+        }
+      };
+    },
+  });
+}
+
+/* --- Collaborators --- */
+
+async function loadCollaborators(repoFullName) {
+  const emptyEl = $("#collabCollabsEmpty");
+  const bodyEl = $("#collabCollabsBody");
+  if (!repoFullName) {
+    emptyEl.classList.remove("hidden");
+    bodyEl.classList.add("hidden");
+    emptyEl.innerHTML = `<p class="text-sm text-hub-dim">Select a repository to manage collaborators.</p>`;
+    return;
+  }
+  emptyEl.classList.remove("hidden");
+  bodyEl.classList.add("hidden");
+  emptyEl.innerHTML = `<div class="flex items-center justify-center py-4"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>`;
+  try {
+    const collabs = await ghFetch(`/repos/${repoFullName}/collaborators?per_page=50`);
+    emptyEl.classList.add("hidden");
+    bodyEl.classList.remove("hidden");
+    renderCollaboratorsList(repoFullName, collabs || []);
+  } catch (err) {
+    emptyEl.innerHTML = `<p class="text-sm text-hub-coral">Failed to load collaborators: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderCollaboratorsList(repoFullName, collabs) {
+  const listEl = $("#collabCollabsList");
+  if (collabs.length === 0) {
+    listEl.innerHTML = `<div class="p-6 text-center text-sm text-hub-dim">No collaborators yet — you're the sole owner.</div>`;
+    return;
+  }
+  listEl.innerHTML = collabs.map((c) => `
+    <div class="flex items-center gap-3 p-3.5">
+      <img src="${escapeAttr(c.avatar_url)}" alt="" class="w-8 h-8 rounded-full shrink-0">
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium truncate">${escapeHtml(c.login)}</p>
+        <p class="text-[11px] text-hub-dim font-mono">${escapeHtml(c.permissions?.admin ? "Admin" : c.permissions?.push ? "Write" : "Read")}</p>
+      </div>
+      ${c.login === state.user?.login ? "" : `<button type="button" class="btnRemoveCollab text-hub-dim hover:text-hub-coral transition-colors shrink-0" data-login="${escapeAttr(c.login)}" aria-label="Remove collaborator"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`}
+    </div>
+  `).join("");
+
+  $all(".btnRemoveCollab", listEl).forEach((btn) => {
+    btn.onclick = async () => {
+      const login = btn.dataset.login;
+      if (!confirm(`Remove ${login} as a collaborator?`)) return;
+      btn.disabled = true;
+      try {
+        await ghFetch(`/repos/${repoFullName}/collaborators/${encodeURIComponent(login)}`, { method: "DELETE" });
+        toast(`${login} removed`, "success");
+        await loadCollaborators(repoFullName);
+      } catch (err) {
+        toast(err.message, "error");
+        btn.disabled = false;
+      }
+    };
+  });
+}
+
+/* --- GitHub Actions workflow runs --- */
+
+async function loadWorkflowRuns(repoFullName) {
+  const emptyEl = $("#collabActionsEmpty");
+  const listEl = $("#collabActionsList");
+  if (!repoFullName) {
+    emptyEl.classList.remove("hidden");
+    listEl.classList.add("hidden");
+    emptyEl.innerHTML = `<p class="text-sm text-hub-dim">Select a repository to view workflow runs.</p>`;
+    return;
+  }
+  emptyEl.classList.remove("hidden");
+  listEl.classList.add("hidden");
+  emptyEl.innerHTML = `<div class="flex items-center justify-center py-4"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>`;
+  try {
+    const data = await ghFetch(`/repos/${repoFullName}/actions/runs?per_page=20`);
+    const runs = data?.workflow_runs || [];
+    if (runs.length === 0) {
+      emptyEl.innerHTML = `<p class="text-sm text-hub-dim">No workflow runs found. This repo may not use GitHub Actions.</p>`;
+      return;
+    }
+    emptyEl.classList.add("hidden");
+    listEl.classList.remove("hidden");
+    listEl.innerHTML = runs.map((run) => {
+      const statusColor = run.conclusion === "success" ? "text-hub-teal" : run.conclusion === "failure" ? "text-hub-coral" : "text-hub-amber";
+      const statusBg = run.conclusion === "success" ? "bg-hub-teal/15" : run.conclusion === "failure" ? "bg-hub-coral/15" : "bg-hub-amber/15";
+      const statusIcon = run.conclusion === "success"
+        ? `<path d="M20 6L9 17l-5-5"/>`
+        : run.conclusion === "failure"
+        ? `<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>`
+        : `<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>`;
+      return `
+        <a href="${safeExternalUrl(run.html_url)}" target="_blank" rel="noopener noreferrer" class="flex items-center gap-3 p-3.5 hover:bg-white/[0.03] transition-colors">
+          <div class="w-8 h-8 rounded-lg ${statusBg} flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4 ${statusColor}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${statusIcon}</svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium truncate">${escapeHtml(run.name || run.display_title || "Workflow run")}</p>
+            <p class="text-[11px] text-hub-dim mt-0.5 font-mono">${escapeHtml(run.head_branch || "?")} · ${escapeHtml(run.status)}${run.conclusion ? ` · ${escapeHtml(run.conclusion)}` : ""} · ${timeAgo(run.created_at)}</p>
+          </div>
+        </a>
+      `;
+    }).join("");
+  } catch (err) {
+    emptyEl.innerHTML = `<p class="text-sm text-hub-coral">Failed to load workflow runs: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+/* --- Webhooks --- */
+
+async function loadWebhooks(repoFullName) {
+  const emptyEl = $("#collabWebhooksEmpty");
+  const bodyEl = $("#collabWebhooksBody");
+  if (!repoFullName) {
+    emptyEl.classList.remove("hidden");
+    bodyEl.classList.add("hidden");
+    emptyEl.innerHTML = `<p class="text-sm text-hub-dim">Select a repository to manage webhooks.</p>`;
+    return;
+  }
+  emptyEl.classList.remove("hidden");
+  bodyEl.classList.add("hidden");
+  emptyEl.innerHTML = `<div class="flex items-center justify-center py-4"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>`;
+  try {
+    const hooks = await ghFetch(`/repos/${repoFullName}/hooks?per_page=50`);
+    emptyEl.classList.add("hidden");
+    bodyEl.classList.remove("hidden");
+    renderWebhooksList(repoFullName, hooks || []);
+  } catch (err) {
+    emptyEl.innerHTML = `<p class="text-sm text-hub-coral">Failed to load webhooks: ${escapeHtml(err.message)}${err.message.includes("denied") ? " (requires admin access to this repository)" : ""}</p>`;
+  }
+}
+
+function renderWebhooksList(repoFullName, hooks) {
+  const listEl = $("#collabWebhooksList");
+  if (hooks.length === 0) {
+    listEl.innerHTML = `<div class="p-6 text-center text-sm text-hub-dim">No webhooks configured for this repository.</div>`;
+    return;
+  }
+  listEl.innerHTML = hooks.map((h) => `
+    <div class="flex items-center gap-3 p-3.5">
+      <div class="w-8 h-8 rounded-lg ${h.active ? "bg-hub-teal/15" : "bg-hub-dim/15"} flex items-center justify-center shrink-0">
+        <svg class="w-4 h-4 ${h.active ? "text-hub-teal" : "text-hub-dim"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 118 15h.02"/><path d="M8 15a4 4 0 01-6 0"/></svg>
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-mono truncate">${escapeHtml(h.config?.url || "unknown URL")}</p>
+        <p class="text-[11px] text-hub-dim">${h.active ? "Active" : "Disabled"} · ${(h.events || []).join(", ")}</p>
+      </div>
+      <button type="button" class="btnRemoveWebhook text-hub-dim hover:text-hub-coral transition-colors shrink-0" data-id="${h.id}" aria-label="Delete webhook">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+      </button>
+    </div>
+  `).join("");
+
+  $all(".btnRemoveWebhook", listEl).forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm("Delete this webhook?")) return;
+      btn.disabled = true;
+      try {
+        await ghFetch(`/repos/${repoFullName}/hooks/${btn.dataset.id}`, { method: "DELETE" });
+        toast("Webhook deleted", "success");
+        await loadWebhooks(repoFullName);
+      } catch (err) {
+        toast(err.message, "error");
+        btn.disabled = false;
+      }
+    };
+  });
+}
+
+async function addWebhook(repoFullName, url) {
+  if (!repoFullName) { toast("Select a repository first", "error"); return; }
+  if (!/^https:\/\/.+/i.test(url)) { toast("Webhook URL must start with https://", "error"); return; }
+  const btn = $("#btnAddWebhook");
+  btn.disabled = true;
+  try {
+    await ghFetch(`/repos/${repoFullName}/hooks`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: "web",
+        active: true,
+        events: ["push"],
+        config: { url, content_type: "json" },
+      }),
+    });
+    toast("Webhook added", "success");
+    $("#webhookUrl").value = "";
+    await loadWebhooks(repoFullName);
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* GLOBAL SEARCH: quick-jump across repos, code, issues                   */
+/* ---------------------------------------------------------------------- */
+
+function openGlobalSearchModal() {
+  if (!state.token) { openTokenModal(); return; }
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="relative mb-4">
+        <svg class="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-hub-dim pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input id="globalSearchInput" type="text" placeholder="Search your repositories or code across GitHub..." autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+      </div>
+      <div class="flex items-center gap-2 mb-4">
+        <button class="searchModeBtn active-search-mode text-xs font-medium px-3 py-1.5 rounded-full border border-hub-teal/40 bg-hub-teal/10 text-hub-teal" data-mode="repos">My Repositories</button>
+        <button class="searchModeBtn text-xs font-medium px-3 py-1.5 rounded-full border border-hub-line text-hub-dim" data-mode="code">Code on GitHub</button>
+      </div>
+      <div id="globalSearchResults" class="max-h-96 overflow-y-auto">
+        <p class="text-sm text-hub-dim text-center py-8">Start typing to search.</p>
+      </div>
+    </div>
+  `;
+  openModal(html, {
+    wide: true,
+    onMount: (root) => {
+      const input = $("#globalSearchInput", root);
+      const resultsEl = $("#globalSearchResults", root);
+      let mode = "repos";
+      input.focus();
+
+      $all(".searchModeBtn", root).forEach((btn) => {
+        btn.onclick = () => {
+          mode = btn.dataset.mode;
+          $all(".searchModeBtn", root).forEach((b) => {
+            b.classList.toggle("active-search-mode", b === btn);
+            b.classList.toggle("border-hub-teal/40", b === btn);
+            b.classList.toggle("bg-hub-teal/10", b === btn);
+            b.classList.toggle("text-hub-teal", b === btn);
+            b.classList.toggle("border-hub-line", b !== btn);
+            b.classList.toggle("text-hub-dim", b !== btn);
+          });
+          runSearch(input.value.trim(), mode, resultsEl);
+        };
+      });
+
+      const debouncedSearch = debounce(() => runSearch(input.value.trim(), mode, resultsEl), 350);
+      input.addEventListener("input", debouncedSearch);
+    },
+  });
+}
+
+async function runSearch(query, mode, resultsEl) {
+  if (!query) {
+    resultsEl.innerHTML = `<p class="text-sm text-hub-dim text-center py-8">Start typing to search.</p>`;
+    return;
+  }
+  resultsEl.innerHTML = `<div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>`;
+
+  if (mode === "repos") {
+    const q = query.toLowerCase();
+    const matches = state.repos.filter((r) =>
+      r.name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q)
+    ).slice(0, 20);
+    if (matches.length === 0) {
+      resultsEl.innerHTML = `<p class="text-sm text-hub-dim text-center py-8">No repositories match "${escapeHtml(query)}".</p>`;
+      return;
+    }
+    resultsEl.innerHTML = matches.map((r) => `
+      <div class="searchResultRow flex items-center gap-3 p-3 rounded-xl hover:bg-white/[0.03] cursor-pointer transition-colors" data-repo="${escapeAttr(r.full_name)}">
+        <div class="w-8 h-8 rounded-lg ${r.private ? "bg-hub-violet/15" : "bg-hub-teal/15"} flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 ${r.private ? "text-hub-violet" : "text-hub-teal"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium font-mono truncate">${escapeHtml(r.full_name)}</p>
+          ${r.description ? `<p class="text-xs text-hub-dim truncate">${escapeHtml(r.description)}</p>` : ""}
+        </div>
+      </div>
+    `).join("");
+    $all(".searchResultRow", resultsEl).forEach((row) => {
+      row.onclick = () => {
+        closeModal();
+        openRepoDetailModal(row.dataset.repo);
+      };
+    });
+    return;
+  }
+
+  // Code search across GitHub (scoped implicitly to what the token can access)
+  try {
+    const data = await ghFetch(`/search/code?q=${encodeURIComponent(query)}&per_page=20`);
+    const items = data?.items || [];
+    if (items.length === 0) {
+      resultsEl.innerHTML = `<p class="text-sm text-hub-dim text-center py-8">No code results for "${escapeHtml(query)}".</p>`;
+      return;
+    }
+    resultsEl.innerHTML = items.map((item) => `
+      <a href="${safeExternalUrl(item.html_url)}" target="_blank" rel="noopener noreferrer" class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/[0.03] transition-colors">
+        <div class="w-8 h-8 rounded-lg bg-white/[0.05] flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-mono truncate">${escapeHtml(item.name)}</p>
+          <p class="text-xs text-hub-dim truncate">${escapeHtml(item.repository?.full_name || "")} · ${escapeHtml(item.path)}</p>
+        </div>
+      </a>
+    `).join("");
+  } catch (err) {
+    resultsEl.innerHTML = `<p class="text-sm text-hub-coral text-center py-8">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* NOTIFICATIONS: GitHub notification inbox                               */
+/* ---------------------------------------------------------------------- */
+
+async function refreshNotificationBadge() {
+  if (!state.token) return;
+  try {
+    const notifs = await ghFetch(`/notifications?per_page=50`);
+    const count = (notifs || []).length;
+    const badge = $("#notifBadge");
+    if (count > 0) {
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  } catch {
+    // Notifications scope may not be granted — fail silently, badge just stays hidden.
+  }
+}
+
+function openNotificationsModal() {
+  if (!state.token) { openTokenModal(); return; }
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">Notifications</h2>
+        <div class="flex items-center gap-2">
+          <button id="btnMarkAllRead" type="button" class="text-xs text-hub-teal font-medium hover:underline">Mark all as read</button>
+          <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors ml-2">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="notifList" class="max-h-96 overflow-y-auto space-y-2">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+    </div>
+  `;
+  openModal(html, {
+    wide: true,
+    onMount: async (root) => {
+      $("#mClose", root).onclick = closeModal;
+      $("#btnMarkAllRead", root).onclick = async () => {
+        const btn = $("#btnMarkAllRead", root);
+        btn.disabled = true;
+        try {
+          await ghFetch(`/notifications`, { method: "PUT", body: JSON.stringify({ read: true }) });
+          toast("All notifications marked as read", "success", 1800);
+          await loadNotificationsInto(root);
+          await refreshNotificationBadge();
+        } catch (err) {
+          toast(err.message, "error");
+        } finally {
+          btn.disabled = false;
+        }
+      };
+      await loadNotificationsInto(root);
+    },
+  });
+}
+
+async function loadNotificationsInto(root) {
+  const listEl = $("#notifList", root);
+  try {
+    const notifs = await ghFetch(`/notifications?per_page=50`);
+    if (!notifs || notifs.length === 0) {
+      listEl.innerHTML = `<p class="text-sm text-hub-dim text-center py-8">You're all caught up — no unread notifications.</p>`;
+      return;
+    }
+    const typeIcon = {
+      Issue: `<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>`,
+      PullRequest: `<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/>`,
+    };
+    listEl.innerHTML = notifs.map((n) => `
+      <div class="flex items-start gap-3 p-3 rounded-xl border border-hub-line bg-white/[0.02]">
+        <div class="w-8 h-8 rounded-lg bg-hub-cyan/15 flex items-center justify-center shrink-0 mt-0.5">
+          <svg class="w-4 h-4 text-hub-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${typeIcon[n.subject?.type] || `<path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>`}</svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium truncate">${escapeHtml(n.subject?.title || "Notification")}</p>
+          <p class="text-[11px] text-hub-dim mt-0.5 font-mono">${escapeHtml(n.repository?.full_name || "")} · ${escapeHtml(n.reason || "")} · ${timeAgo(n.updated_at)}</p>
+        </div>
+      </div>
+    `).join("");
+  } catch (err) {
+    listEl.innerHTML = `<p class="text-sm text-hub-coral text-center py-8">${escapeHtml(err.message.includes("denied") ? "Notifications require the 'notifications' token scope." : err.message)}</p>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* GITIGNORE TEMPLATES                                                    */
+/* ---------------------------------------------------------------------- */
+
+const GITIGNORE_TEMPLATES = {
+  Node: "node_modules/\nnpm-debug.log*\n.env\ndist/\nbuild/\n.DS_Store",
+  Python: "__pycache__/\n*.pyc\n.venv/\nvenv/\n.env\ndist/\nbuild/\n*.egg-info/",
+  Java: "*.class\ntarget/\n.gradle/\nbuild/\n*.jar\n*.war",
+  "React/Next.js": "node_modules/\n.next/\nout/\nbuild/\n.env*.local\n.DS_Store",
+  Android: "*.apk\n*.ap_\n.gradle/\nlocal.properties\n.idea/\nbuild/",
+  General: ".DS_Store\nThumbs.db\n*.log\n.env\n.vscode/\n.idea/",
+};
+
+/* ---------------------------------------------------------------------- */
 /* Upload: staging files (drag/drop, folder, zip)                         */
 /* ---------------------------------------------------------------------- */
 
@@ -1624,18 +2604,207 @@ async function stageZipFile(zipFile) {
 }
 
 /**
- * Automatically pushes staged files as soon as a target repository is selected.
- * If no repository is selected yet, files stay staged and a reminder toast fires;
- * the moment the user picks a repo in the dropdown, the queued files auto-push.
+ * Automatically pushes staged files as soon as a target repository (or, in bulk mode,
+ * at least one target repository) is selected. If nothing is targeted yet, files stay
+ * staged and a reminder toast fires; picking a target then triggers the push.
  */
 function autoPushIfReady() {
-  const repoFullName = $("#targetRepoSelect").value;
-  if (!repoFullName) {
+  const targets = getUploadTargets();
+  if (targets.length === 0) {
     toast("Select a target repository to push automatically", "warn", 3000);
     return;
   }
   if (state.stagedFiles.length === 0) return;
   pushStagedFiles();
+}
+
+function getUploadTargets() {
+  if (state.bulkUpload.enabled) return state.bulkUpload.selectedRepos.slice();
+  const single = $("#targetRepoSelect").value;
+  return single ? [single] : [];
+}
+
+async function readFileAsBase64(file) {
+  const buffer = await file.arrayBuffer();
+  return arrayBufferToBase64(buffer);
+}
+
+/**
+ * Checks whether any staged files would overwrite existing content that differs from
+ * what's being uploaded. Returns the list of conflicting paths (empty if none / repo
+ * doesn't exist yet). Used to prompt the user once per push instead of overwriting silently.
+ */
+async function detectConflicts(repoFullName, branch, subPath) {
+  const conflicts = [];
+  for (const item of state.stagedFiles) {
+    const fullPath = subPath ? `${subPath}/${item.path}` : item.path;
+    try {
+      const existing = await ghFetch(`/repos/${repoFullName}/contents/${encodeURI(fullPath)}?ref=${encodeURIComponent(branch)}`);
+      if (existing && existing.sha) {
+        // Compare content only for reasonably small text-ish files to avoid excessive base64 work;
+        // larger or binary files are flagged as "existing" conflicts by presence alone.
+        conflicts.push({ path: fullPath, sha: existing.sha, size: existing.size });
+      }
+    } catch {
+      // 404 — file doesn't exist yet, no conflict.
+    }
+  }
+  return conflicts;
+}
+
+function openConflictConfirmModal(conflicts, repoLabel) {
+  return new Promise((resolve) => {
+    const html = `
+      <div class="p-5 sm:p-6">
+        <div class="w-12 h-12 rounded-full bg-hub-amber/15 flex items-center justify-center mb-4">
+          <svg class="w-6 h-6 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        </div>
+        <h2 class="font-mono font-bold text-lg mb-1.5">${conflicts.length} file(s) already exist</h2>
+        <p class="text-sm text-hub-dim mb-4 leading-relaxed">These files already exist in <strong class="text-hub-ink font-mono">${escapeHtml(repoLabel)}</strong> and will be overwritten:</p>
+        <div class="bg-white/[0.02] border border-hub-line rounded-xl p-3 mb-5 max-h-32 overflow-y-auto">
+          ${conflicts.slice(0, 12).map((c) => `<p class="text-xs font-mono text-hub-dim truncate">${escapeHtml(c.path)}</p>`).join("")}
+          ${conflicts.length > 12 ? `<p class="text-xs font-mono text-hub-dim mt-1">…and ${conflicts.length - 12} more</p>` : ""}
+        </div>
+        <div class="flex gap-3">
+          <button id="mCancelConflict" type="button" class="flex-1 border border-hub-line py-3 rounded-xl text-sm font-medium hover:bg-white/[0.05] transition-all">Skip these files</button>
+          <button id="btnConfirmOverwrite" type="button" class="flex-1 bg-hub-amber text-hub-bg font-semibold py-3 rounded-xl hover:brightness-110 transition-all text-sm">Overwrite All</button>
+        </div>
+      </div>
+    `;
+    openModal(html, {
+      onMount: (root) => {
+        $("#mCancelConflict", root).onclick = () => { closeModal(); resolve(false); };
+        $("#btnConfirmOverwrite", root).onclick = () => { closeModal(); resolve(true); };
+      },
+    });
+  });
+}
+
+async function pushStagedFiles() {
+  const targets = getUploadTargets();
+  const branch = $("#targetBranch").value.trim() || "main";
+  const subPath = $("#targetPath").value.trim().replace(/^\/+|\/+$/g, "");
+  const message = $("#commitMessage").value.trim() || `Upload ${state.stagedFiles.length} file(s) via RepoHub`;
+
+  if (targets.length === 0) { toast("Select a target repository first", "error"); return; }
+  if (state.stagedFiles.length === 0) { toast("No files staged for upload", "error"); return; }
+  if (state.uploadInProgress) return; // guard against overlapping auto-triggers
+  state.uploadInProgress = true;
+
+  const btn = $("#btnDoUpload");
+  const btnText = $("#btnDoUploadText");
+  if (btn) { btn.disabled = true; btnText.innerHTML = `<span class="spinner"></span>`; }
+
+  const progressWrap = $("#uploadProgressWrap");
+  const progressBar = $("#uploadProgressBar");
+  const progressPct = $("#uploadProgressPct");
+  const progressLabel = $("#uploadProgressLabel");
+  progressWrap.classList.remove("hidden");
+  progressBar.style.width = "0%";
+  progressPct.textContent = "0%";
+
+  // Conflict check runs once against the first target as a representative sample —
+  // for bulk pushes each repo is still checked individually below before writing.
+  let skipConflicting = false;
+  const firstTargetConflicts = await detectConflicts(targets[0], branch, subPath);
+  if (firstTargetConflicts.length > 0) {
+    const label = targets.length > 1 ? `${targets[0]} (+${targets.length - 1} more)` : targets[0];
+    const proceedOverwrite = await openConflictConfirmModal(firstTargetConflicts, label);
+    if (!proceedOverwrite) skipConflicting = true;
+  }
+
+  let grandTotalFiles = 0;
+  let grandFailCount = 0;
+  const perRepoResults = [];
+
+  const totalOps = targets.length * state.stagedFiles.length;
+  let doneOps = 0;
+
+  for (const repoFullName of targets) {
+    const conflictPaths = new Set((await detectConflicts(repoFullName, branch, subPath)).map((c) => c.path));
+    let repoFail = 0;
+    const failedNames = [];
+
+    for (const item of state.stagedFiles) {
+      const fullPath = subPath ? `${subPath}/${item.path}` : item.path;
+      progressLabel.textContent = `Uploading ${item.path} → ${repoFullName}...`;
+
+      if (skipConflicting && conflictPaths.has(fullPath)) {
+        doneOps++;
+        const pct = Math.round((doneOps / totalOps) * 100);
+        progressBar.style.width = `${pct}%`;
+        progressPct.textContent = `${pct}%`;
+        continue;
+      }
+
+      try {
+        const base64Content = await readFileAsBase64(item.file);
+        let sha;
+        try {
+          const existing = await ghFetch(`/repos/${repoFullName}/contents/${encodeURI(fullPath)}?ref=${encodeURIComponent(branch)}`);
+          if (existing && existing.sha) sha = existing.sha;
+        } catch { /* file doesn't exist yet — that's fine, create new */ }
+
+        await ghFetch(`/repos/${repoFullName}/contents/${encodeURI(fullPath)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            message,
+            content: base64Content,
+            branch,
+            ...(sha ? { sha } : {}),
+          }),
+        });
+        grandTotalFiles++;
+      } catch (err) {
+        repoFail++;
+        grandFailCount++;
+        failedNames.push(item.path);
+        console.error(`Failed to upload ${item.path} to ${repoFullName}:`, err.message);
+      }
+      doneOps++;
+      const pct = Math.round((doneOps / totalOps) * 100);
+      progressBar.style.width = `${pct}%`;
+      progressPct.textContent = `${pct}%`;
+    }
+    perRepoResults.push({ repoFullName, failCount: repoFail, failedNames });
+  }
+
+  state.pushCount += 1;
+  $("#statPushCount").textContent = state.pushCount;
+
+  const total = state.stagedFiles.length;
+  if (targets.length === 1) {
+    const { repoFullName, failCount, failedNames } = perRepoResults[0];
+    if (failCount === 0) {
+      logActivity("push", `Pushed to ${repoFullName}`, `${total} file(s) · branch ${branch}`);
+      toast(`${total} file(s) pushed to ${repoFullName}`, "success");
+    } else if (failCount < total) {
+      logActivity("push", `Partial push to ${repoFullName}`, `${total - failCount}/${total} file(s) succeeded`);
+      toast(`${total - failCount}/${total} file(s) succeeded, ${failCount} failed (${failedNames.slice(0, 3).join(", ")}${failedNames.length > 3 ? "..." : ""})`, "warn", 6000);
+    } else {
+      logActivity("error", `Push failed for ${repoFullName}`, "All files failed to upload");
+      toast("All files failed to upload. Check your token, repository name, or connection.", "error", 6000);
+    }
+  } else {
+    const successRepos = perRepoResults.filter((r) => r.failCount === 0).length;
+    logActivity("push", `Bulk push to ${targets.length} repositories`, `${successRepos}/${targets.length} repos fully succeeded`);
+    if (grandFailCount === 0) {
+      toast(`${total} file(s) pushed to ${targets.length} repositories`, "success");
+    } else {
+      toast(`Bulk push finished with ${grandFailCount} failure(s) across ${targets.length} repositories`, "warn", 6000);
+    }
+  }
+
+  clearStaged();
+  $("#commitMessage").value = "";
+  if (btn) { btn.disabled = false; btnText.textContent = "Push to GitHub"; }
+  state.uploadInProgress = false;
+  setTimeout(() => progressWrap.classList.add("hidden"), 1500);
+
+  await refreshRepos();
+  if (targets.includes(state.explorer.repoFullName)) {
+    await loadExplorerFolder();
+  }
 }
 
 function renderStagedList() {
@@ -1651,7 +2820,8 @@ function renderStagedList() {
   count.textContent = state.stagedFiles.length;
 
   list.innerHTML = state.stagedFiles.map((item, idx) => `
-    <div class="flex items-center gap-3 p-3.5">
+    <div class="flex items-center gap-3 p-3.5 stagedFileRow" data-idx="${idx}" draggable="true">
+      <svg class="w-3.5 h-3.5 text-hub-dim shrink-0 cursor-grab active:cursor-grabbing" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.4"/><circle cx="8" cy="12" r="1.4"/><circle cx="8" cy="18" r="1.4"/><circle cx="16" cy="6" r="1.4"/><circle cx="16" cy="12" r="1.4"/><circle cx="16" cy="18" r="1.4"/></svg>
       <div class="w-8 h-8 rounded-lg bg-white/[0.05] flex items-center justify-center shrink-0">
         <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${iconForFileName(item.path)}</svg>
       </div>
@@ -1671,6 +2841,26 @@ function renderStagedList() {
       renderStagedList();
     };
   });
+
+  // Drag-to-reorder: simple HTML5 drag/drop swap on the queue before it auto-pushes.
+  let dragSrcIdx = null;
+  $all(".stagedFileRow", list).forEach((row) => {
+    row.addEventListener("dragstart", (e) => {
+      dragSrcIdx = Number(row.dataset.idx);
+      e.dataTransfer.effectAllowed = "move";
+      row.style.opacity = "0.4";
+    });
+    row.addEventListener("dragend", () => { row.style.opacity = "1"; });
+    row.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const targetIdx = Number(row.dataset.idx);
+      if (dragSrcIdx === null || dragSrcIdx === targetIdx) return;
+      const [moved] = state.stagedFiles.splice(dragSrcIdx, 1);
+      state.stagedFiles.splice(targetIdx, 0, moved);
+      renderStagedList();
+    });
+  });
 }
 
 function clearStaged() {
@@ -1680,107 +2870,20 @@ function clearStaged() {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Upload: push staged files to GitHub                                    */
-/* ---------------------------------------------------------------------- */
-
-async function readFileAsBase64(file) {
-  const buffer = await file.arrayBuffer();
-  return arrayBufferToBase64(buffer);
-}
-
-async function pushStagedFiles() {
-  const repoFullName = $("#targetRepoSelect").value;
-  const branch = $("#targetBranch").value.trim() || "main";
-  const subPath = $("#targetPath").value.trim().replace(/^\/+|\/+$/g, "");
-  const message = $("#commitMessage").value.trim() || `Upload ${state.stagedFiles.length} file(s) via RepoHub`;
-
-  if (!repoFullName) { toast("Select a target repository first", "error"); return; }
-  if (state.stagedFiles.length === 0) { toast("No files staged for upload", "error"); return; }
-  if (state.uploadInProgress) return; // guard against overlapping auto-triggers
-  state.uploadInProgress = true;
-
-  const btn = $("#btnDoUpload");
-  const btnText = $("#btnDoUploadText");
-  btn.disabled = true;
-  btnText.innerHTML = `<span class="spinner"></span>`;
-
-  const progressWrap = $("#uploadProgressWrap");
-  const progressBar = $("#uploadProgressBar");
-  const progressPct = $("#uploadProgressPct");
-  const progressLabel = $("#uploadProgressLabel");
-  progressWrap.classList.remove("hidden");
-  progressBar.style.width = "0%";
-  progressPct.textContent = "0%";
-
-  let done = 0;
-  const total = state.stagedFiles.length;
-  let failCount = 0;
-  const failedNames = [];
-
-  for (const item of state.stagedFiles) {
-    const fullPath = subPath ? `${subPath}/${item.path}` : item.path;
-    progressLabel.textContent = `Uploading ${item.path}...`;
-    try {
-      const base64Content = await readFileAsBase64(item.file);
-
-      let sha;
-      try {
-        const existing = await ghFetch(`/repos/${repoFullName}/contents/${encodeURI(fullPath)}?ref=${encodeURIComponent(branch)}`);
-        if (existing && existing.sha) sha = existing.sha;
-      } catch { /* file doesn't exist yet — that's fine, create new */ }
-
-      await ghFetch(`/repos/${repoFullName}/contents/${encodeURI(fullPath)}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          message,
-          content: base64Content,
-          branch,
-          ...(sha ? { sha } : {}),
-        }),
-      });
-    } catch (err) {
-      failCount++;
-      failedNames.push(item.path);
-      console.error(`Failed to upload ${item.path}:`, err.message);
-    }
-    done++;
-    const pct = Math.round((done / total) * 100);
-    progressBar.style.width = `${pct}%`;
-    progressPct.textContent = `${pct}%`;
-  }
-
-  state.pushCount += 1;
-  $("#statPushCount").textContent = state.pushCount;
-
-  if (failCount === 0) {
-    logActivity("push", `Pushed to ${repoFullName}`, `${total} file(s) · branch ${branch}`);
-    toast(`${total} file(s) pushed to ${repoFullName}`, "success");
-  } else if (failCount < total) {
-    logActivity("push", `Partial push to ${repoFullName}`, `${total - failCount}/${total} file(s) succeeded`);
-    toast(`${total - failCount}/${total} file(s) succeeded, ${failCount} failed (${failedNames.slice(0, 3).join(", ")}${failedNames.length > 3 ? "..." : ""})`, "warn", 6000);
-  } else {
-    logActivity("error", `Push failed for ${repoFullName}`, "All files failed to upload");
-    toast("All files failed to upload. Check your token, repository name, or connection.", "error", 6000);
-  }
-
-  clearStaged();
-  $("#commitMessage").value = "";
-  btn.disabled = false;
-  btnText.textContent = "Push to GitHub";
-  state.uploadInProgress = false;
-  setTimeout(() => progressWrap.classList.add("hidden"), 1500);
-
-  await refreshRepos();
-  if (state.explorer.repoFullName === repoFullName) {
-    await loadExplorerFolder();
-  }
-}
-
-/* ---------------------------------------------------------------------- */
 /* Event bindings                                                         */
 /* ---------------------------------------------------------------------- */
 
 function bindEvents() {
+  $("#btnThemeToggle").addEventListener("click", toggleTheme);
+  $("#btnGlobalSearch").addEventListener("click", openGlobalSearchModal);
+  $("#btnNotifications").addEventListener("click", openNotificationsModal);
+
+  $("#bulkUploadToggle").addEventListener("change", (e) => {
+    state.bulkUpload.enabled = e.target.checked;
+    $("#targetRepoSelect").classList.toggle("hidden", state.bulkUpload.enabled);
+    $("#bulkRepoChecklist").classList.toggle("hidden", !state.bulkUpload.enabled);
+  });
+
   $all("[data-view]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1853,6 +2956,36 @@ function bindEvents() {
   });
   $("#btnNewIssue").addEventListener("click", openNewIssueModal);
 
+  // Collaborate
+  $("#collabRepoSelect").addEventListener("change", (e) => onCollabRepoSelected(e.target.value));
+  $all(".collabTab").forEach((tab) => {
+    tab.addEventListener("click", () => switchCollabTab(tab.dataset.tab));
+  });
+  $("#btnCollabInvite").addEventListener("click", async () => {
+    const username = $("#collabInviteUsername").value.trim();
+    const repoFullName = state.collaborate.repoFullName;
+    if (!repoFullName) { toast("Select a repository first", "error"); return; }
+    if (!username) { toast("Enter a GitHub username", "error"); return; }
+    const btn = $("#btnCollabInvite");
+    btn.disabled = true;
+    try {
+      await ghFetch(`/repos/${repoFullName}/collaborators/${encodeURIComponent(username)}`, {
+        method: "PUT",
+        body: JSON.stringify({ permission: "push" }),
+      });
+      toast(`Invitation sent to ${username}`, "success");
+      $("#collabInviteUsername").value = "";
+      await loadCollaborators(repoFullName);
+    } catch (err) {
+      toast(err.message, "error");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $("#btnAddWebhook").addEventListener("click", () => {
+    addWebhook(state.collaborate.repoFullName, $("#webhookUrl").value.trim());
+  });
+
   // Activity
   $("#btnClearActivity").addEventListener("click", clearActivityLog);
 
@@ -1915,6 +3048,18 @@ function bindEvents() {
       e.preventDefault();
     }
   }, true);
+
+  // Offline queue: if the connection drops mid-session, staged files wait; when it
+  // returns, any files still staged (upload interrupted or never started) auto-retry.
+  window.addEventListener("offline", () => {
+    toast("You're offline. Uploads will resume automatically once reconnected.", "warn", 5000);
+  });
+  window.addEventListener("online", () => {
+    toast("Back online.", "success", 2200);
+    if (state.stagedFiles.length > 0 && !state.uploadInProgress) {
+      autoPushIfReady();
+    }
+  });
 }
 
 function openWipeTokenConfirmModal() {
@@ -1947,6 +3092,8 @@ function openWipeTokenConfirmModal() {
 
 async function init() {
   bindEvents();
+  loadTheme();
+  loadFavorites();
   loadActivity();
   renderActivity();
   renderAuthUI();
