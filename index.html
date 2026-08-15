@@ -99,11 +99,22 @@
         <button data-view="upload" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Upload</button>
         <button data-view="repos" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Repositories</button>
         <button data-view="issues" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Issues</button>
+        <button data-view="collaborate" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Collaborate</button>
         <button data-view="activity" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Activity</button>
         <button data-view="security" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Security</button>
       </nav>
 
       <div class="flex items-center gap-2 sm:gap-3">
+        <button id="btnNotifications" type="button" class="relative w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.03] border border-hub-line hover:bg-white/[0.06] transition-all shrink-0" aria-label="Notifications">
+          <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+          <span id="notifBadge" class="hidden absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-hub-coral text-white text-[9px] font-bold font-mono flex items-center justify-center">0</span>
+        </button>
+        <button id="btnGlobalSearch" type="button" class="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.03] border border-hub-line hover:bg-white/[0.06] transition-all shrink-0" aria-label="Search">
+          <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        </button>
+        <button id="btnThemeToggle" type="button" class="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.03] border border-hub-line hover:bg-white/[0.06] transition-all shrink-0" aria-label="Toggle theme">
+          <svg id="themeToggleIcon" class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        </button>
         <div id="connStatusPill" class="hidden sm:flex items-center gap-2 pl-3 pr-1 py-1 rounded-full border border-hub-line bg-white/[0.03] backdrop-blur-xl">
           <span class="relative flex h-2 w-2">
             <span id="connDot" class="absolute inline-flex h-full w-full rounded-full bg-hub-coral"></span>
@@ -193,6 +204,10 @@
       <button data-view="issues" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
         Issues
+      </button>
+      <button data-view="collaborate" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Collaborate
       </button>
       <button data-view="activity" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
@@ -433,11 +448,18 @@
 
     <div id="uploadContent" class="hidden space-y-5 sm:space-y-6">
       <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5">
-        <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Target repository</label>
-        <div class="flex flex-col sm:flex-row gap-3">
-          <select id="targetRepoSelect" class="flex-1 bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
-            <option value="">— select repository —</option>
-          </select>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim block">Target repository</label>
+          <label class="flex items-center gap-1.5 text-[11px] text-hub-dim cursor-pointer">
+            <input id="bulkUploadToggle" type="checkbox" class="w-3.5 h-3.5 rounded accent-hub-teal">
+            Push to multiple repos
+          </label>
+        </div>
+        <select id="targetRepoSelect" class="flex-1 w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
+          <option value="">— select repository —</option>
+        </select>
+        <div id="bulkRepoChecklist" class="hidden mt-2 max-h-40 overflow-y-auto border border-hub-line rounded-xl p-2 space-y-1"></div>
+        <div class="flex flex-col sm:flex-row gap-3 mt-3">
           <button id="btnNewRepoQuick" class="flex items-center justify-center gap-1.5 border border-hub-line rounded-xl px-4 py-3 text-sm font-medium hover:bg-white/[0.05] transition-all shrink-0">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
             New repo
@@ -603,6 +625,84 @@
     </div>
   </section>
 
+  <!-- ---------- COLLABORATE (PRs, collaborators, Actions, webhooks) ---------- -->
+  <section id="view-collaborate" class="view-panel hidden max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
+    <div class="mb-5 sm:mb-6">
+      <div class="text-xs font-mono text-hub-teal mb-1">COLLABORATE</div>
+      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Team &amp; Automation</h1>
+      <p class="text-sm text-hub-dim mt-1">Pull requests, collaborators, workflow runs, and webhooks in one place.</p>
+    </div>
+
+    <div id="collaborateGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
+      <p class="text-sm text-hub-dim">Connect your GitHub account to manage collaboration tools.</p>
+      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Connect GitHub</button>
+    </div>
+
+    <div id="collaborateContent" class="hidden">
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-3 sm:p-4 mb-4">
+        <div class="relative">
+          <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-hub-dim pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+          <select id="collabRepoSelect" class="w-full bg-hub-deep border border-hub-line rounded-xl pl-10 pr-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
+            <option value="">— select repository —</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-1 mb-4 overflow-x-auto whitespace-nowrap border-b border-hub-line">
+        <button class="collabTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-hub-teal text-hub-teal shrink-0" data-tab="pulls">Pull Requests</button>
+        <button class="collabTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-transparent text-hub-dim shrink-0" data-tab="collabs">Collaborators</button>
+        <button class="collabTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-transparent text-hub-dim shrink-0" data-tab="actions">Actions</button>
+        <button class="collabTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-transparent text-hub-dim shrink-0" data-tab="webhooks">Webhooks</button>
+      </div>
+
+      <div id="collabPanelPulls" class="collabPanel">
+        <div id="collabPullsEmpty" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-10 text-center">
+          <p class="text-sm text-hub-dim">Select a repository to view pull requests.</p>
+        </div>
+        <div id="collabPullsList" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl divide-y divide-hub-line overflow-hidden hidden"></div>
+      </div>
+
+      <div id="collabPanelCollabs" class="collabPanel hidden">
+        <div id="collabCollabsEmpty" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-10 text-center">
+          <p class="text-sm text-hub-dim">Select a repository to manage collaborators.</p>
+        </div>
+        <div id="collabCollabsBody" class="hidden">
+          <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5 mb-4">
+            <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Invite a collaborator</label>
+            <div class="flex gap-2">
+              <input id="collabInviteUsername" type="text" placeholder="GitHub username" autocomplete="off" class="flex-1 bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+              <button id="btnCollabInvite" type="button" class="flex items-center gap-1.5 bg-hub-teal text-hub-bg font-semibold px-4 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all shrink-0">Invite</button>
+            </div>
+          </div>
+          <div id="collabCollabsList" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl divide-y divide-hub-line overflow-hidden"></div>
+        </div>
+      </div>
+
+      <div id="collabPanelActions" class="collabPanel hidden">
+        <div id="collabActionsEmpty" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-10 text-center">
+          <p class="text-sm text-hub-dim">Select a repository to view workflow runs.</p>
+        </div>
+        <div id="collabActionsList" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl divide-y divide-hub-line overflow-hidden hidden"></div>
+      </div>
+
+      <div id="collabPanelWebhooks" class="collabPanel hidden">
+        <div id="collabWebhooksEmpty" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-10 text-center">
+          <p class="text-sm text-hub-dim">Select a repository to manage webhooks.</p>
+        </div>
+        <div id="collabWebhooksBody" class="hidden">
+          <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5 mb-4">
+            <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Add webhook</label>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input id="webhookUrl" type="text" placeholder="https://example.com/webhook" autocomplete="off" class="flex-1 bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+              <button id="btnAddWebhook" type="button" class="flex items-center justify-center gap-1.5 bg-hub-teal text-hub-bg font-semibold px-4 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all shrink-0">Add</button>
+            </div>
+          </div>
+          <div id="collabWebhooksList" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl divide-y divide-hub-line overflow-hidden"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ---------- ACTIVITY ---------- -->
   <section id="view-activity" class="view-panel hidden max-w-4xl mx-auto px-3 sm:px-6 lg:px-8">
     <div class="mb-6 sm:mb-8">
@@ -735,9 +835,9 @@
       </div>
       <span class="font-mono">RepoHub</span>
       <span class="text-hub-line">·</span>
-      <span>Built for people who'd rather not touch a terminal</span>
+      <span>Your GitHub workflow, simplified</span>
     </div>
-    <p class="text-xs font-mono text-hub-dim">Runs 100% in your browser — no backend server</p>
+    <p class="text-xs font-mono text-hub-dim">Private by design — everything runs client-side</p>
   </div>
 </footer>
 
