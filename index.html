@@ -1,12 +1,13 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>RepoHub — GitHub Control Deck</title>
-<meta name="description" content="RepoHub: upload folder, upload ZIP, jelajahi file, dan kelola repo GitHub kamu langsung dari browser.">
+<meta name="description" content="RepoHub: upload folders, upload ZIP archives, browse files, manage issues and branches, and control your GitHub repositories from one secure dashboard.">
+<meta name="referrer" content="no-referrer">
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -40,7 +41,6 @@
           'pulse-ring': 'pulseRing 2.4s cubic-bezier(0.4,0,0.6,1) infinite',
           'scan': 'scan 3s linear infinite',
           'in-up': 'inUp .45s cubic-bezier(.16,1,.3,1) both',
-          'spin-slow': 'spin 6s linear infinite',
         },
         keyframes: {
           float: {
@@ -94,11 +94,13 @@
       </a>
 
       <nav class="hidden md:flex items-center gap-1 bg-white/[0.03] border border-hub-line rounded-full px-1.5 py-1.5 backdrop-blur-xl">
-        <button data-view="dashboard" class="nav-link active-nav px-4 py-1.5 rounded-full text-sm font-medium transition-all">Dashboard</button>
-        <button data-view="explorer" class="nav-link px-4 py-1.5 rounded-full text-sm font-medium transition-all">Jelajahi</button>
-        <button data-view="upload" class="nav-link px-4 py-1.5 rounded-full text-sm font-medium transition-all">Upload</button>
-        <button data-view="repos" class="nav-link px-4 py-1.5 rounded-full text-sm font-medium transition-all">Repository</button>
-        <button data-view="activity" class="nav-link px-4 py-1.5 rounded-full text-sm font-medium transition-all">Aktivitas</button>
+        <button data-view="dashboard" class="nav-link active-nav px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Dashboard</button>
+        <button data-view="explorer" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Explorer</button>
+        <button data-view="upload" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Upload</button>
+        <button data-view="repos" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Repositories</button>
+        <button data-view="issues" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Issues</button>
+        <button data-view="activity" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Activity</button>
+        <button data-view="security" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Security</button>
       </nav>
 
       <div class="flex items-center gap-2 sm:gap-3">
@@ -106,12 +108,12 @@
           <span class="relative flex h-2 w-2">
             <span id="connDot" class="absolute inline-flex h-full w-full rounded-full bg-hub-coral"></span>
           </span>
-          <span id="connText" class="text-xs font-mono text-hub-dim">Belum terhubung</span>
+          <span id="connText" class="text-xs font-mono text-hub-dim">Not connected</span>
         </div>
 
         <button id="btnConnect" class="hidden items-center gap-1.5 bg-hub-teal text-hub-bg text-sm font-semibold px-3.5 sm:px-4 py-2 rounded-full hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-hub-teal/20">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.221-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.338 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.34-.012 2.421-.012 2.751 0 .268.18.58.688.482A10.02 10.02 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-          <span class="hidden sm:inline">Hubungkan GitHub</span>
+          <span class="hidden sm:inline">Connect GitHub</span>
           <span class="sm:hidden">Connect</span>
         </button>
 
@@ -144,15 +146,19 @@
             <div class="p-2">
               <button id="btnOpenTokenModal" class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm hover:bg-white/[0.05] transition-colors text-left">
                 <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                Kelola Token
+                Manage Token
               </button>
-              <a id="btnOpenGithubProfile" href="#" target="_blank" rel="noopener" class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm hover:bg-white/[0.05] transition-colors text-left">
+              <button data-view="security" id="btnOpenSecurityFromMenu" class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm hover:bg-white/[0.05] transition-colors text-left">
+                <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Security Center
+              </button>
+              <a id="btnOpenGithubProfile" href="#" target="_blank" rel="noopener noreferrer" class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm hover:bg-white/[0.05] transition-colors text-left">
                 <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
-                Buka Profil GitHub
+                Open GitHub Profile
               </a>
               <button id="btnLogout" class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm hover:bg-hub-coral/10 text-hub-coral transition-colors text-left mt-1 border-t border-hub-line pt-3">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
-                Keluar (Log Out)
+                Log Out
               </button>
             </div>
           </div>
@@ -167,14 +173,14 @@
   </div>
 
   <div id="mobileNavPanel" class="hidden md:hidden max-w-7xl mx-auto px-3 pb-4">
-    <div class="rounded-2xl border border-hub-line bg-hub-surface/95 backdrop-blur-2xl p-2 space-y-1 shadow-2xl shadow-black/40">
+    <div class="rounded-2xl border border-hub-line bg-hub-surface/95 backdrop-blur-2xl p-2 space-y-1 shadow-2xl shadow-black/40 max-h-[70vh] overflow-y-auto">
       <button data-view="dashboard" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
         Dashboard
       </button>
       <button data-view="explorer" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-        Jelajahi File
+        File Explorer
       </button>
       <button data-view="upload" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
@@ -182,11 +188,19 @@
       </button>
       <button data-view="repos" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
-        Repository
+        Repositories
+      </button>
+      <button data-view="issues" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+        Issues
       </button>
       <button data-view="activity" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        Aktivitas
+        Activity
+      </button>
+      <button data-view="security" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Security Center
       </button>
     </div>
   </div>
@@ -202,24 +216,24 @@
       <div class="text-center max-w-3xl mx-auto pt-6 sm:pt-10 pb-14">
         <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-hub-line bg-white/[0.03] text-xs font-mono text-hub-teal mb-6">
           <span class="w-1.5 h-1.5 rounded-full bg-hub-teal animate-pulse"></span>
-          repo push, tanpa buka terminal
+          push repos without touching a terminal
         </div>
         <h1 class="font-mono font-extrabold text-[2.1rem] leading-[1.12] sm:text-5xl sm:leading-[1.08] tracking-tight">
-          Drop foldernya.<br class="hidden sm:block"> <span class="text-transparent bg-clip-text bg-gradient-to-r from-hub-teal via-hub-cyan to-hub-violet">Kami yang push.</span>
+          Drop the folder.<br class="hidden sm:block"> <span class="text-transparent bg-clip-text bg-gradient-to-r from-hub-teal via-hub-cyan to-hub-violet">We push it for you.</span>
         </h1>
         <p class="mt-5 text-hub-dim text-[15px] sm:text-base leading-relaxed max-w-xl mx-auto">
-          RepoHub menyambungkan folder, ZIP, atau file di HP dan laptop kamu langsung ke repository GitHub — upload, jelajahi, dan kelola semuanya dari satu layar.
+          RepoHub connects folders, ZIP archives, and files on your phone or laptop straight to your GitHub repositories — upload, browse, manage issues, and control everything from one screen.
         </p>
         <div class="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
           <button id="btnHeroConnect" class="w-full sm:w-auto flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold px-6 py-3.5 rounded-2xl hover:brightness-110 active:scale-95 transition-all shadow-xl shadow-hub-teal/20">
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.221-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.338 4.695-4.566 4.943.359.31.678.921.678 1.856 0 1.34-.012 2.421-.012 2.751 0 .268.18.58.688.482A10.02 10.02 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-            Hubungkan akun GitHub
+            Connect GitHub Account
           </button>
           <a href="#howto" class="w-full sm:w-auto flex items-center justify-center gap-2 border border-hub-line px-6 py-3.5 rounded-2xl font-medium text-sm hover:bg-white/[0.04] transition-all">
-            Cara pakai token →
+            How to get a token →
           </a>
         </div>
-        <p class="mt-4 text-[11px] font-mono text-hub-dim">Token disimpan lokal di browser kamu saja — tidak pernah dikirim ke server manapun selain api.github.com</p>
+        <p class="mt-4 text-[11px] font-mono text-hub-dim">Your token is stored locally in your browser only — it is never sent anywhere except api.github.com</p>
       </div>
 
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 pb-14">
@@ -227,54 +241,58 @@
           <div class="w-9 h-9 rounded-xl bg-hub-teal/10 flex items-center justify-center mb-3">
             <svg class="w-4.5 h-4.5 text-hub-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
           </div>
-          <h3 class="font-semibold text-sm">Upload Folder</h3>
-          <p class="text-xs text-hub-dim mt-1 leading-relaxed">Pilih folder utuh, struktur sub-folder ikut terjaga.</p>
+          <h3 class="font-semibold text-sm">Upload Folders</h3>
+          <p class="text-xs text-hub-dim mt-1 leading-relaxed">Select an entire folder — subfolder structure is preserved.</p>
         </div>
         <div class="feature-card p-4 sm:p-5 rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl">
           <div class="w-9 h-9 rounded-xl bg-hub-cyan/10 flex items-center justify-center mb-3">
             <svg class="w-4.5 h-4.5 text-hub-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
           </div>
-          <h3 class="font-semibold text-sm">Upload & Extract ZIP</h3>
-          <p class="text-xs text-hub-dim mt-1 leading-relaxed">.zip otomatis diekstrak di browser sebelum dikirim.</p>
+          <h3 class="font-semibold text-sm">Upload &amp; Extract ZIP</h3>
+          <p class="text-xs text-hub-dim mt-1 leading-relaxed">.zip files are extracted right in your browser before upload.</p>
         </div>
         <div class="feature-card p-4 sm:p-5 rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl">
           <div class="w-9 h-9 rounded-xl bg-hub-violet/10 flex items-center justify-center mb-3">
             <svg class="w-4.5 h-4.5 text-hub-violet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
           </div>
-          <h3 class="font-semibold text-sm">Jelajahi File Repo</h3>
-          <p class="text-xs text-hub-dim mt-1 leading-relaxed">Buka folder, pindah antar repo, lihat & hapus file.</p>
+          <h3 class="font-semibold text-sm">Browse Repo Files</h3>
+          <p class="text-xs text-hub-dim mt-1 leading-relaxed">Open folders, switch repos, view, edit, and delete files.</p>
         </div>
         <div class="feature-card p-4 sm:p-5 rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl">
           <div class="w-9 h-9 rounded-xl bg-hub-amber/10 flex items-center justify-center mb-3">
-            <svg class="w-4.5 h-4.5 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.6 2.4 7.2L12 16.4 5.6 21l2.4-7.2-6-4.6h7.6z"/></svg>
+            <svg class="w-4.5 h-4.5 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
           </div>
-          <h3 class="font-semibold text-sm">Riwayat Aktivitas</h3>
-          <p class="text-xs text-hub-dim mt-1 leading-relaxed">Lacak semua push & perubahan dari dashboard.</p>
+          <h3 class="font-semibold text-sm">Issue Tracking</h3>
+          <p class="text-xs text-hub-dim mt-1 leading-relaxed">Create, comment, and close issues without leaving RepoHub.</p>
         </div>
       </div>
 
       <div id="howto" class="max-w-3xl mx-auto pb-16 scroll-mt-28">
         <div class="rounded-3xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-6 sm:p-8">
-          <h2 class="font-mono font-bold text-lg mb-1">Cara mendapatkan Personal Access Token</h2>
-          <p class="text-sm text-hub-dim mb-6">Token dipakai untuk menghubungkan RepoHub ke akun GitHub kamu secara aman.</p>
+          <h2 class="font-mono font-bold text-lg mb-1">How to get a Personal Access Token</h2>
+          <p class="text-sm text-hub-dim mb-6">A token connects RepoHub to your GitHub account securely, without ever sharing your password.</p>
           <ol class="space-y-4">
             <li class="flex gap-3.5">
               <span class="shrink-0 w-7 h-7 rounded-full bg-hub-teal/15 text-hub-teal font-mono text-xs font-bold flex items-center justify-center">1</span>
-              <p class="text-sm text-hub-dim pt-1">Buka <a href="https://github.com/settings/tokens/new" target="_blank" rel="noopener" class="text-hub-teal hover:underline">github.com/settings/tokens/new</a></p>
+              <p class="text-sm text-hub-dim pt-1">Open <a href="https://github.com/settings/tokens/new" target="_blank" rel="noopener noreferrer" class="text-hub-teal hover:underline">github.com/settings/tokens/new</a></p>
             </li>
             <li class="flex gap-3.5">
               <span class="shrink-0 w-7 h-7 rounded-full bg-hub-teal/15 text-hub-teal font-mono text-xs font-bold flex items-center justify-center">2</span>
-              <p class="text-sm text-hub-dim pt-1">Beri nama token, atur masa berlaku sesuai kebutuhan</p>
+              <p class="text-sm text-hub-dim pt-1">Name the token and set a short expiration date (30–90 days is recommended)</p>
             </li>
             <li class="flex gap-3.5">
               <span class="shrink-0 w-7 h-7 rounded-full bg-hub-teal/15 text-hub-teal font-mono text-xs font-bold flex items-center justify-center">3</span>
-              <p class="text-sm text-hub-dim pt-1">Centang scope <code class="text-hub-cyan bg-white/5 px-1.5 py-0.5 rounded font-mono text-xs">repo</code> agar RepoHub bisa membaca &amp; menulis repo</p>
+              <p class="text-sm text-hub-dim pt-1">Check the <code class="text-hub-cyan bg-white/5 px-1.5 py-0.5 rounded font-mono text-xs">repo</code> scope so RepoHub can read and write repositories</p>
             </li>
             <li class="flex gap-3.5">
               <span class="shrink-0 w-7 h-7 rounded-full bg-hub-teal/15 text-hub-teal font-mono text-xs font-bold flex items-center justify-center">4</span>
-              <p class="text-sm text-hub-dim pt-1">Generate token, salin, lalu tempel di tombol "Hubungkan GitHub"</p>
+              <p class="text-sm text-hub-dim pt-1">Generate the token, copy it, and paste it into the "Connect GitHub" button</p>
             </li>
           </ol>
+          <div class="mt-5 flex items-start gap-2.5 bg-hub-amber/5 border border-hub-amber/20 rounded-xl p-3.5">
+            <svg class="w-4 h-4 text-hub-amber shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+            <p class="text-xs text-hub-dim leading-relaxed">Never share your token with anyone. Treat it like a password — anyone with it can access your repositories according to the scopes you granted.</p>
+          </div>
         </div>
       </div>
     </div>
@@ -283,12 +301,12 @@
       <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 sm:mb-8">
         <div>
           <div class="text-xs font-mono text-hub-teal mb-1">DASHBOARD</div>
-          <h1 id="welcomeText" class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Halo 👋</h1>
+          <h1 id="welcomeText" class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Welcome 👋</h1>
         </div>
         <div class="flex gap-2">
           <button data-view="explorer" class="flex items-center justify-center gap-2 border border-hub-line px-4 py-2.5 rounded-xl hover:bg-white/[0.05] transition-all text-sm font-medium">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-            Jelajahi
+            Explore
           </button>
           <button data-view="upload" class="flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold px-4 py-2.5 rounded-xl hover:brightness-110 active:scale-95 transition-all text-sm shadow-lg shadow-hub-teal/20">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
@@ -314,15 +332,15 @@
         </div>
         <div class="stat-card p-4 sm:p-5 rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] font-mono uppercase tracking-wider text-hub-dim">Followers</span>
-            <svg class="w-3.5 h-3.5 text-hub-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            <span class="text-[11px] font-mono uppercase tracking-wider text-hub-dim">Open Issues</span>
+            <svg class="w-3.5 h-3.5 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
           </div>
-          <div id="statFollowers" class="font-mono font-extrabold text-2xl sm:text-3xl">0</div>
+          <div id="statOpenIssues" class="font-mono font-extrabold text-2xl sm:text-3xl">0</div>
         </div>
         <div class="stat-card p-4 sm:p-5 rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] font-mono uppercase tracking-wider text-hub-dim">Push Sesi Ini</span>
-            <svg class="w-3.5 h-3.5 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            <span class="text-[11px] font-mono uppercase tracking-wider text-hub-dim">Pushes This Session</span>
+            <svg class="w-3.5 h-3.5 text-hub-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
           </div>
           <div id="statPushCount" class="font-mono font-extrabold text-2xl sm:text-3xl">0</div>
         </div>
@@ -331,15 +349,15 @@
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         <div class="lg:col-span-2 rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl overflow-hidden">
           <div class="flex items-center justify-between p-4 sm:p-5 border-b border-hub-line">
-            <h2 class="font-mono font-semibold text-sm">Repository Terbaru</h2>
-            <button data-view="repos" class="text-xs text-hub-teal font-medium hover:underline">Lihat semua →</button>
+            <h2 class="font-mono font-semibold text-sm">Recent Repositories</h2>
+            <button data-view="repos" class="text-xs text-hub-teal font-medium hover:underline">View all →</button>
           </div>
           <div id="dashRecentRepos" class="divide-y divide-hub-line"></div>
         </div>
 
         <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl overflow-hidden">
           <div class="flex items-center justify-between p-4 sm:p-5 border-b border-hub-line">
-            <h2 class="font-mono font-semibold text-sm">Aktivitas Terkini</h2>
+            <h2 class="font-mono font-semibold text-sm">Recent Activity</h2>
           </div>
           <div id="dashRecentActivity" class="divide-y divide-hub-line max-h-[420px] overflow-y-auto"></div>
         </div>
@@ -350,24 +368,23 @@
   <!-- ---------- EXPLORER (file browser) ---------- -->
   <section id="view-explorer" class="view-panel hidden max-w-6xl mx-auto px-3 sm:px-6 lg:px-8">
     <div class="mb-5 sm:mb-6">
-      <div class="text-xs font-mono text-hub-teal mb-1">JELAJAHI</div>
-      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Jelajahi File Repository</h1>
-      <p class="text-sm text-hub-dim mt-1">Buka folder, pindah antar repo, unduh atau hapus file langsung dari sini.</p>
+      <div class="text-xs font-mono text-hub-teal mb-1">EXPLORER</div>
+      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Browse Repository Files</h1>
+      <p class="text-sm text-hub-dim mt-1">Open folders, switch repositories and branches, preview, edit or delete files.</p>
     </div>
 
     <div id="explorerGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
-      <p class="text-sm text-hub-dim">Hubungkan akun GitHub dulu untuk menjelajahi file.</p>
-      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Hubungkan GitHub</button>
+      <p class="text-sm text-hub-dim">Connect your GitHub account to browse files.</p>
+      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Connect GitHub</button>
     </div>
 
     <div id="explorerContent" class="hidden">
-      <!-- Repo switcher + branch -->
       <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-3 sm:p-4 mb-4">
         <div class="flex flex-col sm:flex-row gap-2.5">
           <div class="relative flex-1">
             <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-hub-dim pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
             <select id="explorerRepoSelect" class="w-full bg-hub-deep border border-hub-line rounded-xl pl-10 pr-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
-              <option value="">— pilih repository —</option>
+              <option value="">— select repository —</option>
             </select>
           </div>
           <div class="relative w-full sm:w-44">
@@ -383,22 +400,18 @@
         </div>
       </div>
 
-      <!-- Breadcrumb -->
-      <div class="flex items-center gap-1 mb-3 overflow-x-auto whitespace-nowrap pb-1 -mx-1 px-1" id="explorerBreadcrumb">
-        <!-- injected -->
-      </div>
+      <div class="flex items-center gap-1 mb-3 overflow-x-auto whitespace-nowrap pb-1 -mx-1 px-1" id="explorerBreadcrumb"></div>
 
-      <!-- File list -->
       <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl overflow-hidden">
         <div id="explorerLoading" class="hidden p-10 text-center">
           <div class="spinner mx-auto mb-3 text-hub-teal" style="width:24px;height:24px;"></div>
-          <p class="text-sm text-hub-dim">Memuat isi folder...</p>
+          <p class="text-sm text-hub-dim">Loading folder contents...</p>
         </div>
         <div id="explorerEmpty" class="hidden p-10 text-center">
-          <p class="text-sm text-hub-dim">Pilih repository untuk mulai menjelajahi.</p>
+          <p class="text-sm text-hub-dim">Select a repository to start browsing.</p>
         </div>
         <div id="explorerFolderEmpty" class="hidden p-10 text-center">
-          <p class="text-sm text-hub-dim">Folder ini kosong.</p>
+          <p class="text-sm text-hub-dim">This folder is empty.</p>
         </div>
         <div id="explorerList" class="divide-y divide-hub-line"></div>
       </div>
@@ -409,30 +422,30 @@
   <section id="view-upload" class="view-panel hidden max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
     <div class="mb-5 sm:mb-6">
       <div class="text-xs font-mono text-hub-teal mb-1">UPLOAD</div>
-      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Kirim file ke GitHub</h1>
-      <p class="text-sm text-hub-dim mt-1">Upload folder, file lepas, atau ZIP — kami susun jadi commit yang rapi.</p>
+      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Send Files to GitHub</h1>
+      <p class="text-sm text-hub-dim mt-1">Upload folders, loose files, or a ZIP archive — we'll turn it into a clean commit.</p>
     </div>
 
     <div id="uploadGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
-      <p class="text-sm text-hub-dim">Hubungkan akun GitHub dulu untuk mulai upload.</p>
-      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Hubungkan GitHub</button>
+      <p class="text-sm text-hub-dim">Connect your GitHub account to start uploading.</p>
+      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Connect GitHub</button>
     </div>
 
     <div id="uploadContent" class="hidden space-y-5 sm:space-y-6">
       <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5">
-        <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Repository tujuan</label>
+        <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Target repository</label>
         <div class="flex flex-col sm:flex-row gap-3">
           <select id="targetRepoSelect" class="flex-1 bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
-            <option value="">— pilih repository —</option>
+            <option value="">— select repository —</option>
           </select>
           <button id="btnNewRepoQuick" class="flex items-center justify-center gap-1.5 border border-hub-line rounded-xl px-4 py-3 text-sm font-medium hover:bg-white/[0.05] transition-all shrink-0">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
-            Repo baru
+            New repo
           </button>
         </div>
         <div class="flex flex-col sm:flex-row gap-3 mt-3">
-          <input id="targetBranch" type="text" value="main" placeholder="nama branch" class="flex-1 bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
-          <input id="targetPath" type="text" placeholder="sub-folder tujuan (opsional, contoh: src/)" class="flex-[2] bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <input id="targetBranch" type="text" value="main" placeholder="branch name" autocomplete="off" spellcheck="false" class="flex-1 bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <input id="targetPath" type="text" placeholder="target subfolder (optional, e.g. src/)" autocomplete="off" spellcheck="false" class="flex-[2] bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
         </div>
       </div>
 
@@ -450,45 +463,45 @@
             <svg class="w-7 h-7 text-hub-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
           </div>
         </div>
-        <h3 class="font-semibold text-base sm:text-lg mb-1">Tarik &amp; lepas di sini</h3>
-        <p class="text-sm text-hub-dim mb-5">Folder, beberapa file sekaligus, atau satu file .zip</p>
+        <h3 class="font-semibold text-base sm:text-lg mb-1">Drag &amp; drop here</h3>
+        <p class="text-sm text-hub-dim mb-5">A folder, multiple files at once, or a single .zip file</p>
         <div class="flex flex-wrap items-center justify-center gap-2.5">
           <button id="btnPickFiles" type="button" class="flex items-center gap-2 bg-white/[0.05] border border-hub-line px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-white/[0.09] transition-all">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M13 2v7h7"/></svg>
-            Pilih File
+            Choose Files
           </button>
           <button id="btnPickFolder" type="button" class="flex items-center gap-2 bg-white/[0.05] border border-hub-line px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-white/[0.09] transition-all">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-            Pilih Folder
+            Choose Folder
           </button>
           <button id="btnPickZip" type="button" class="flex items-center gap-2 bg-hub-cyan/10 border border-hub-cyan/30 text-hub-cyan px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-hub-cyan/20 transition-all">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
             Upload ZIP (auto-extract)
           </button>
         </div>
-        <p class="mt-3 text-[11px] text-hub-dim">Android: tombol "Pilih Folder" memakai file picker sistem bawaan Chrome/browser kamu.</p>
+        <p class="mt-3 text-[11px] text-hub-dim">On Android, "Choose Folder" uses your browser's built-in system file picker.</p>
       </div>
 
       <div id="stagedWrap" class="hidden rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl overflow-hidden">
         <div class="flex items-center justify-between p-4 sm:p-5 border-b border-hub-line">
           <div class="flex items-center gap-2">
-            <h2 class="font-mono font-semibold text-sm">File siap diupload</h2>
+            <h2 class="font-mono font-semibold text-sm">Files ready to upload</h2>
             <span id="stagedCount" class="text-[11px] font-mono bg-hub-teal/15 text-hub-teal px-2 py-0.5 rounded-full">0</span>
           </div>
-          <button id="btnClearStaged" class="text-xs text-hub-coral font-medium hover:underline">Bersihkan</button>
+          <button id="btnClearStaged" class="text-xs text-hub-coral font-medium hover:underline">Clear all</button>
         </div>
         <div id="stagedList" class="max-h-72 overflow-y-auto divide-y divide-hub-line"></div>
         <div class="p-4 sm:p-5 border-t border-hub-line">
-          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Pesan commit</label>
-          <input id="commitMessage" type="text" placeholder="contoh: upload aset awal dari RepoHub" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Commit message</label>
+          <input id="commitMessage" type="text" placeholder="e.g. upload initial assets from RepoHub" autocomplete="off" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
           <button id="btnDoUpload" class="w-full flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-hub-teal/20 disabled:opacity-50 disabled:cursor-not-allowed">
             <svg class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-            <span id="btnDoUploadText">Push ke GitHub</span>
+            <span id="btnDoUploadText">Push to GitHub</span>
           </button>
         </div>
         <div id="uploadProgressWrap" class="hidden p-4 sm:p-5 border-t border-hub-line">
           <div class="flex items-center justify-between text-xs font-mono text-hub-dim mb-2">
-            <span id="uploadProgressLabel">Mengunggah...</span>
+            <span id="uploadProgressLabel">Uploading...</span>
             <span id="uploadProgressPct">0%</span>
           </div>
           <div class="h-2 rounded-full bg-white/5 overflow-hidden">
@@ -503,35 +516,85 @@
   <section id="view-repos" class="view-panel hidden max-w-6xl mx-auto px-3 sm:px-6 lg:px-8">
     <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 sm:mb-8">
       <div>
-        <div class="text-xs font-mono text-hub-teal mb-1">REPOSITORY</div>
-        <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Kelola repo kamu</h1>
+        <div class="text-xs font-mono text-hub-teal mb-1">REPOSITORIES</div>
+        <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Manage Your Repositories</h1>
       </div>
       <button id="btnNewRepo" class="flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold px-4 py-2.5 rounded-xl hover:brightness-110 active:scale-95 transition-all text-sm shadow-lg shadow-hub-teal/20">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
-        Buat Repository
+        New Repository
       </button>
     </div>
 
     <div id="reposGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
-      <p class="text-sm text-hub-dim">Hubungkan akun GitHub dulu untuk melihat repository.</p>
-      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Hubungkan GitHub</button>
+      <p class="text-sm text-hub-dim">Connect your GitHub account to view repositories.</p>
+      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Connect GitHub</button>
     </div>
 
     <div id="reposContent" class="hidden">
       <div class="flex flex-col sm:flex-row gap-3 mb-5">
         <div class="relative flex-1">
           <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          <input id="repoSearch" type="text" placeholder="Cari repository..." class="w-full bg-white/[0.02] border border-hub-line rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <input id="repoSearch" type="text" placeholder="Search repositories..." autocomplete="off" class="w-full bg-white/[0.02] border border-hub-line rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
         </div>
         <select id="repoSortSelect" class="bg-white/[0.02] border border-hub-line rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
-          <option value="updated">Terbaru diubah</option>
-          <option value="name">Nama A-Z</option>
-          <option value="stars">Paling banyak star</option>
+          <option value="updated">Recently updated</option>
+          <option value="name">Name A-Z</option>
+          <option value="stars">Most stars</option>
         </select>
       </div>
       <div id="repoGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
       <div id="repoEmptyState" class="hidden text-center py-16">
-        <p class="text-sm text-hub-dim">Tidak ada repository yang cocok.</p>
+        <p class="text-sm text-hub-dim">No repositories match your search.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- ISSUES ---------- -->
+  <section id="view-issues" class="view-panel hidden max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
+    <div class="mb-5 sm:mb-6">
+      <div class="text-xs font-mono text-hub-teal mb-1">ISSUES</div>
+      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Issue Tracker</h1>
+      <p class="text-sm text-hub-dim mt-1">Create, review, and manage issues for any of your repositories.</p>
+    </div>
+
+    <div id="issuesGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
+      <p class="text-sm text-hub-dim">Connect your GitHub account to manage issues.</p>
+      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Connect GitHub</button>
+    </div>
+
+    <div id="issuesContent" class="hidden">
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-3 sm:p-4 mb-4">
+        <div class="flex flex-col sm:flex-row gap-2.5">
+          <div class="relative flex-1">
+            <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-hub-dim pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+            <select id="issuesRepoSelect" class="w-full bg-hub-deep border border-hub-line rounded-xl pl-10 pr-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
+              <option value="">— select repository —</option>
+            </select>
+          </div>
+          <select id="issuesStateFilter" class="w-full sm:w-40 bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 appearance-none">
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+            <option value="all">All</option>
+          </select>
+          <button id="btnNewIssue" class="flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold rounded-xl px-4 py-2.5 text-sm hover:brightness-110 transition-all shrink-0">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+            New Issue
+          </button>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl overflow-hidden">
+        <div id="issuesLoading" class="hidden p-10 text-center">
+          <div class="spinner mx-auto mb-3 text-hub-teal" style="width:24px;height:24px;"></div>
+          <p class="text-sm text-hub-dim">Loading issues...</p>
+        </div>
+        <div id="issuesEmpty" class="hidden p-10 text-center">
+          <p class="text-sm text-hub-dim">Select a repository to view its issues.</p>
+        </div>
+        <div id="issuesListEmpty" class="hidden p-10 text-center">
+          <p class="text-sm text-hub-dim">No issues found for this filter.</p>
+        </div>
+        <div id="issuesList" class="divide-y divide-hub-line"></div>
       </div>
     </div>
   </section>
@@ -539,18 +602,120 @@
   <!-- ---------- ACTIVITY ---------- -->
   <section id="view-activity" class="view-panel hidden max-w-4xl mx-auto px-3 sm:px-6 lg:px-8">
     <div class="mb-6 sm:mb-8">
-      <div class="text-xs font-mono text-hub-teal mb-1">AKTIVITAS</div>
-      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Riwayat aksi RepoHub</h1>
-      <p class="text-sm text-hub-dim mt-1">Semua push, pembuatan repo, dan perubahan yang kamu lakukan lewat sesi ini.</p>
+      <div class="text-xs font-mono text-hub-teal mb-1">ACTIVITY</div>
+      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">RepoHub Activity Log</h1>
+      <p class="text-sm text-hub-dim mt-1">Every push, repository change, and action you've taken this session.</p>
     </div>
     <div id="activityGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
-      <p class="text-sm text-hub-dim">Hubungkan akun GitHub dulu untuk melihat aktivitas.</p>
-      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Hubungkan GitHub</button>
+      <p class="text-sm text-hub-dim">Connect your GitHub account to view activity.</p>
+      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Connect GitHub</button>
     </div>
     <div id="activityContent" class="hidden rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl overflow-hidden">
+      <div class="flex items-center justify-between p-4 sm:p-5 border-b border-hub-line">
+        <h2 class="font-mono font-semibold text-sm">Timeline</h2>
+        <button id="btnClearActivity" class="text-xs text-hub-coral font-medium hover:underline">Clear log</button>
+      </div>
       <div id="activityList" class="divide-y divide-hub-line"></div>
       <div id="activityEmpty" class="p-10 text-center">
-        <p class="text-sm text-hub-dim">Belum ada aktivitas. Yuk mulai upload sesuatu.</p>
+        <p class="text-sm text-hub-dim">No activity yet. Start by uploading something.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- SECURITY CENTER ---------- -->
+  <section id="view-security" class="view-panel hidden max-w-4xl mx-auto px-3 sm:px-6 lg:px-8">
+    <div class="mb-6 sm:mb-8">
+      <div class="text-xs font-mono text-hub-teal mb-1">SECURITY</div>
+      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Security Center</h1>
+      <p class="text-sm text-hub-dim mt-1">Review how RepoHub protects your credentials and data.</p>
+    </div>
+
+    <div class="space-y-4">
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-hub-teal/15 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-hub-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-sm mb-1">Local-only token storage</h3>
+            <p class="text-xs text-hub-dim leading-relaxed">Your Personal Access Token is stored exclusively in this browser's local storage. It is never transmitted to any server except <code class="text-hub-cyan bg-white/5 px-1 rounded font-mono">api.github.com</code>, and RepoHub has no backend of its own that could log or leak it.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-hub-cyan/15 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-hub-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-sm mb-1">HTTPS-only communication</h3>
+            <p class="text-xs text-hub-dim leading-relaxed">All requests use TLS-encrypted HTTPS. The token field is masked by default, and content pasted into it is never logged, cached, or written to browser history.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-hub-violet/15 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-hub-violet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-sm mb-1">Output sanitization</h3>
+            <p class="text-xs text-hub-dim leading-relaxed">All repository names, file names, commit messages, and issue content are escaped before being rendered, preventing malicious content from a repo or file name executing in your browser.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-hub-amber/15 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-sm mb-1">External links are safe by default</h3>
+            <p class="text-xs text-hub-dim leading-relaxed">Every outbound link opens with <code class="text-hub-cyan bg-white/5 px-1 rounded font-mono">rel="noopener noreferrer"</code>, preventing the destination page from accessing this tab or your referrer data.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-hub-coral/20 bg-hub-coral/5 backdrop-blur-xl p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-hub-coral/15 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-hub-coral" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-sm mb-1">Recommended practices</h3>
+            <ul class="text-xs text-hub-dim leading-relaxed space-y-1.5 mt-2 list-disc list-inside">
+              <li>Use fine-grained tokens scoped to specific repositories when possible.</li>
+              <li>Set short token expirations (30–90 days) and rotate regularly.</li>
+              <li>Revoke this token immediately from GitHub settings if this device is lost or shared.</li>
+              <li>Never paste your token into any site other than RepoHub or github.com.</li>
+            </ul>
+            <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs text-hub-coral font-medium hover:underline mt-3">
+              Manage your tokens on GitHub
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 17L17 7M7 7h10v10"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div id="securitySessionInfo" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-5 sm:p-6">
+        <h3 class="font-semibold text-sm mb-3">This session</h3>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p class="text-[11px] text-hub-dim uppercase font-mono tracking-wide mb-0.5">Connection status</p>
+            <p id="secConnStatus" class="font-mono font-semibold">Not connected</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-hub-dim uppercase font-mono tracking-wide mb-0.5">Token scope check</p>
+            <p id="secScopeStatus" class="font-mono font-semibold">—</p>
+          </div>
+        </div>
+        <button id="btnRevokeLocalToken" class="mt-4 w-full sm:w-auto flex items-center justify-center gap-2 border border-hub-coral/30 text-hub-coral font-medium px-4 py-2.5 rounded-xl text-sm hover:bg-hub-coral/10 transition-all">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+          Wipe token from this browser
+        </button>
       </div>
     </div>
   </section>
@@ -566,9 +731,9 @@
       </div>
       <span class="font-mono">RepoHub</span>
       <span class="text-hub-line">·</span>
-      <span>Dibuat untuk yang malas buka terminal</span>
+      <span>Built for people who'd rather not touch a terminal</span>
     </div>
-    <p class="text-xs font-mono text-hub-dim">Berjalan 100% di browser kamu — tanpa server backend</p>
+    <p class="text-xs font-mono text-hub-dim">Runs 100% in your browser — no backend server</p>
   </div>
 </footer>
 
