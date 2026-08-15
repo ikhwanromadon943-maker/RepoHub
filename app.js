@@ -22,6 +22,7 @@ const state = {
   repos: [],
   activity: [],
   stagedFiles: [], // { path, file, size }
+  uploadInProgress: false,
   pushCount: 0,
   currentView: "dashboard",
   explorer: {
@@ -1591,7 +1592,8 @@ function stageFiles(fileList) {
     state.stagedFiles.push({ path: relPath, file, size: file.size });
   });
   renderStagedList();
-  toast(`${arr.length} file${arr.length === 1 ? "" : "s"} added to the upload queue`, "info", 2200);
+  toast(`${arr.length} file${arr.length === 1 ? "" : "s"} added — pushing automatically...`, "info", 2200);
+  autoPushIfReady();
 }
 
 async function stageZipFile(zipFile) {
@@ -1614,10 +1616,26 @@ async function stageZipFile(zipFile) {
       state.stagedFiles.push({ path: entry.name, file, size: blob.size });
     }
     renderStagedList();
-    toast(`${entries.length} file${entries.length === 1 ? "" : "s"} extracted from ${zipFile.name}`, "success");
+    toast(`${entries.length} file${entries.length === 1 ? "" : "s"} extracted from ${zipFile.name} — pushing automatically...`, "success");
+    autoPushIfReady();
   } catch (err) {
     toast("Failed to extract ZIP: " + err.message, "error");
   }
+}
+
+/**
+ * Automatically pushes staged files as soon as a target repository is selected.
+ * If no repository is selected yet, files stay staged and a reminder toast fires;
+ * the moment the user picks a repo in the dropdown, the queued files auto-push.
+ */
+function autoPushIfReady() {
+  const repoFullName = $("#targetRepoSelect").value;
+  if (!repoFullName) {
+    toast("Select a target repository to push automatically", "warn", 3000);
+    return;
+  }
+  if (state.stagedFiles.length === 0) return;
+  pushStagedFiles();
 }
 
 function renderStagedList() {
@@ -1678,6 +1696,8 @@ async function pushStagedFiles() {
 
   if (!repoFullName) { toast("Select a target repository first", "error"); return; }
   if (state.stagedFiles.length === 0) { toast("No files staged for upload", "error"); return; }
+  if (state.uploadInProgress) return; // guard against overlapping auto-triggers
+  state.uploadInProgress = true;
 
   const btn = $("#btnDoUpload");
   const btnText = $("#btnDoUploadText");
@@ -1747,6 +1767,7 @@ async function pushStagedFiles() {
   $("#commitMessage").value = "";
   btn.disabled = false;
   btnText.textContent = "Push to GitHub";
+  state.uploadInProgress = false;
   setTimeout(() => progressWrap.classList.add("hidden"), 1500);
 
   await refreshRepos();
@@ -1801,6 +1822,11 @@ function bindEvents() {
 
   $("#repoSearch").addEventListener("input", debounce(renderRepoGrid, 150));
   $("#repoSortSelect").addEventListener("change", renderRepoGrid);
+
+  // If files are already staged and the user then picks a repo, push right away.
+  $("#targetRepoSelect").addEventListener("change", () => {
+    if (state.stagedFiles.length > 0) autoPushIfReady();
+  });
 
   // Explorer
   $("#explorerRepoSelect").addEventListener("change", (e) => {
