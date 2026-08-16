@@ -100,6 +100,7 @@
         <button data-view="repos" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Repositories</button>
         <button data-view="issues" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Issues</button>
         <button data-view="collaborate" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Collaborate</button>
+        <button data-view="account" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Account</button>
         <button data-view="activity" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Activity</button>
         <button data-view="security" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Security</button>
       </nav>
@@ -111,9 +112,6 @@
         </button>
         <button id="btnGlobalSearch" type="button" class="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.03] border border-hub-line hover:bg-white/[0.06] transition-all shrink-0" aria-label="Search">
           <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        </button>
-        <button id="btnThemeToggle" type="button" class="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.03] border border-hub-line hover:bg-white/[0.06] transition-all shrink-0" aria-label="Toggle theme">
-          <svg id="themeToggleIcon" class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
         </button>
         <div id="connStatusPill" class="hidden sm:flex items-center gap-2 pl-3 pr-1 py-1 rounded-full border border-hub-line bg-white/[0.03] backdrop-blur-xl">
           <span class="relative flex h-2 w-2">
@@ -208,6 +206,10 @@
       <button data-view="collaborate" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Collaborate
+      </button>
+      <button data-view="account" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Account
       </button>
       <button data-view="activity" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
@@ -415,7 +417,19 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-1 mb-3 overflow-x-auto whitespace-nowrap pb-1 -mx-1 px-1" id="explorerBreadcrumb"></div>
+      <div class="flex items-center justify-between gap-2 mb-3">
+        <div class="flex items-center gap-1 overflow-x-auto whitespace-nowrap pb-1 -mx-1 px-1 flex-1" id="explorerBreadcrumb"></div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button id="btnExplorerNewFile" type="button" class="flex items-center gap-1.5 border border-hub-line rounded-lg px-2.5 py-1.5 text-xs font-medium hover:bg-white/[0.05] transition-all" title="New file">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M13 2v7h7"/><path d="M12 12v6M9 15h6"/></svg>
+            <span class="hidden sm:inline">File</span>
+          </button>
+          <button id="btnExplorerNewFolder" type="button" class="flex items-center gap-1.5 border border-hub-line rounded-lg px-2.5 py-1.5 text-xs font-medium hover:bg-white/[0.05] transition-all" title="New folder">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M12 10v6M9 13h6"/></svg>
+            <span class="hidden sm:inline">Folder</span>
+          </button>
+        </div>
+      </div>
 
       <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl overflow-hidden">
         <div id="explorerLoading" class="hidden p-10 text-center">
@@ -557,7 +571,7 @@
     </div>
 
     <div id="reposContent" class="hidden">
-      <div class="flex flex-col sm:flex-row gap-3 mb-5">
+      <div class="flex flex-col sm:flex-row gap-3 mb-3">
         <div class="relative flex-1">
           <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
           <input id="repoSearch" type="text" placeholder="Search repositories..." autocomplete="off" class="w-full bg-white/[0.02] border border-hub-line rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
@@ -567,6 +581,20 @@
           <option value="name">Name A-Z</option>
           <option value="stars">Most stars</option>
         </select>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 mb-5">
+        <select id="repoLangFilter" class="bg-white/[0.02] border border-hub-line rounded-xl px-3.5 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <option value="">All languages</option>
+        </select>
+        <select id="repoVisFilter" class="bg-white/[0.02] border border-hub-line rounded-xl px-3.5 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <option value="">All visibility</option>
+          <option value="public">Public only</option>
+          <option value="private">Private only</option>
+        </select>
+        <label class="flex items-center gap-1.5 text-xs text-hub-dim cursor-pointer ml-1">
+          <input id="repoPinnedFilter" type="checkbox" class="w-3.5 h-3.5 rounded accent-hub-amber">
+          Pinned only
+        </label>
       </div>
       <div id="repoGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
       <div id="repoEmptyState" class="hidden text-center py-16">
@@ -722,6 +750,49 @@
       <div id="activityList" class="divide-y divide-hub-line"></div>
       <div id="activityEmpty" class="p-10 text-center">
         <p class="text-sm text-hub-dim">No activity yet. Start by uploading something.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- ACCOUNT (Gists, SSH Keys) ---------- -->
+  <section id="view-account" class="view-panel hidden max-w-4xl mx-auto px-3 sm:px-6 lg:px-8">
+    <div class="mb-6 sm:mb-8">
+      <div class="text-xs font-mono text-hub-teal mb-1">ACCOUNT</div>
+      <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Gists &amp; SSH Keys</h1>
+      <p class="text-sm text-hub-dim mt-1">Manage your GitHub Gists and SSH keys without leaving RepoHub.</p>
+    </div>
+
+    <div id="accountGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
+      <p class="text-sm text-hub-dim">Connect your GitHub account to manage gists and SSH keys.</p>
+      <button class="btnConnectAlias mt-4 inline-flex items-center gap-2 bg-hub-teal text-hub-bg font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Connect GitHub</button>
+    </div>
+
+    <div id="accountContent" class="hidden">
+      <div class="flex items-center gap-1 mb-4 overflow-x-auto whitespace-nowrap border-b border-hub-line">
+        <button class="accountTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-hub-teal text-hub-teal shrink-0" data-tab="gists">Gists</button>
+        <button class="accountTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-transparent text-hub-dim shrink-0" data-tab="keys">SSH Keys</button>
+      </div>
+
+      <div id="accountPanelGists" class="accountPanel">
+        <button id="btnNewGist" type="button" class="flex items-center gap-1.5 bg-hub-teal text-hub-bg font-semibold px-4 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all mb-4">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+          New Gist
+        </button>
+        <div id="gistsListWrap" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl divide-y divide-hub-line overflow-hidden">
+          <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+        </div>
+      </div>
+
+      <div id="accountPanelKeys" class="accountPanel hidden">
+        <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5 mb-4">
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2 block">Add SSH public key</label>
+          <input id="sshKeyTitle" type="text" placeholder="Key title (e.g. My Laptop)" autocomplete="off" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <textarea id="sshKeyValue" rows="3" placeholder="ssh-ed25519 AAAA..." spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-xs font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50"></textarea>
+          <button id="btnAddSshKey" type="button" class="w-full flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">Add Key</button>
+        </div>
+        <div id="sshKeysListWrap" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl divide-y divide-hub-line overflow-hidden">
+          <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+        </div>
       </div>
     </div>
   </section>
