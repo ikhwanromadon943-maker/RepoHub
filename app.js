@@ -14,7 +14,7 @@ const GH_API = "https://api.github.com";
 const LS_TOKEN_KEY = "repohub_token";
 const LS_ACTIVITY_KEY = "repohub_activity";
 const LS_FAVORITES_KEY = "repohub_favorites";
-const LS_THEME_KEY = "repohub_theme";
+const LS_ONBOARDING_KEY = "repohub_onboarding_seen";
 const ALLOWED_HOSTS = new Set(["github.com", "api.github.com", "raw.githubusercontent.com", "githubusercontent.com"]);
 
 const state = {
@@ -286,23 +286,6 @@ function toggleFavorite(fullName) {
 /* Theme (light / dark)                                                   */
 /* ---------------------------------------------------------------------- */
 
-function loadTheme() {
-  let saved;
-  try { saved = localStorage.getItem(LS_THEME_KEY); } catch { saved = null; }
-  applyTheme(saved === "light" ? "light" : "dark");
-}
-function applyTheme(theme) {
-  document.documentElement.classList.toggle("theme-light", theme === "light");
-  try { localStorage.setItem(LS_THEME_KEY, theme); } catch {}
-  const icon = $("#themeToggleIcon");
-  if (icon) icon.innerHTML = theme === "light"
-    ? `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>`
-    : `<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>`;
-}
-function toggleTheme() {
-  const isLight = document.documentElement.classList.contains("theme-light");
-  applyTheme(isLight ? "dark" : "light");
-}
 
 /* ---------------------------------------------------------------------- */
 /* GitHub API wrapper                                                     */
@@ -440,6 +423,68 @@ function logout() {
   toast("You've been logged out of RepoHub", "info");
 }
 
+function maybeShowOnboarding() {
+  let seen;
+  try { seen = localStorage.getItem(LS_ONBOARDING_KEY); } catch { seen = null; }
+  if (seen) return;
+  openOnboardingModal();
+}
+
+function openOnboardingModal() {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-hub-teal to-hub-cyan flex items-center justify-center shrink-0">
+            <svg viewBox="0 0 24 24" class="w-4 h-4 text-hub-bg" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 12l4-7h10l4 7-9 10-9-10z"/></svg>
+          </div>
+          <h2 class="font-mono font-bold text-lg">Welcome to RepoHub</h2>
+        </div>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-hub-dim mb-5">You're connected as <span class="text-hub-teal font-mono">@${escapeHtml(state.user?.login || "")}</span>. Here's the fastest way to get going:</p>
+      <div class="space-y-2.5">
+        <div class="flex items-start gap-3 p-3.5 rounded-xl border border-hub-line bg-white/[0.02]">
+          <div class="w-6 h-6 rounded-full bg-hub-teal/15 text-hub-teal font-mono text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">1</div>
+          <div>
+            <p class="text-sm font-medium">Create or pick a repository</p>
+            <p class="text-xs text-hub-dim mt-0.5">Head to <strong class="text-hub-ink">Repositories</strong> and hit "New Repository", or use one you already have.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-3 p-3.5 rounded-xl border border-hub-line bg-white/[0.02]">
+          <div class="w-6 h-6 rounded-full bg-hub-teal/15 text-hub-teal font-mono text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">2</div>
+          <div>
+            <p class="text-sm font-medium">Upload your files</p>
+            <p class="text-xs text-hub-dim mt-0.5">Drag a folder or ZIP into <strong class="text-hub-ink">Upload</strong> — it pushes automatically once a repo is selected.</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-3 p-3.5 rounded-xl border border-hub-line bg-white/[0.02]">
+          <div class="w-6 h-6 rounded-full bg-hub-teal/15 text-hub-teal font-mono text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">3</div>
+          <div>
+            <p class="text-sm font-medium">Explore, track issues, collaborate</p>
+            <p class="text-xs text-hub-dim mt-0.5">Browse files in <strong class="text-hub-ink">Explorer</strong>, file bugs in <strong class="text-hub-ink">Issues</strong>, and manage PRs in <strong class="text-hub-ink">Collaborate</strong>.</p>
+          </div>
+        </div>
+      </div>
+      <button id="btnDismissOnboarding" type="button" class="w-full mt-5 flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3 rounded-xl hover:brightness-110 transition-all text-sm">
+        Let's go
+      </button>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      const dismiss = () => {
+        try { localStorage.setItem(LS_ONBOARDING_KEY, "1"); } catch {}
+        closeModal();
+      };
+      $("#mClose", root).onclick = dismiss;
+      $("#btnDismissOnboarding", root).onclick = dismiss;
+    },
+  });
+}
+
 async function tryAutoConnect() {
   let saved;
   try { saved = localStorage.getItem(LS_TOKEN_KEY); } catch { saved = null; }
@@ -462,7 +507,10 @@ async function onConnected(silent = false) {
   renderDashboard();
   renderSecurityInfo();
   refreshNotificationBadge();
-  if (!silent) switchView("dashboard");
+  if (!silent) {
+    switchView("dashboard");
+    maybeShowOnboarding();
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -522,6 +570,9 @@ function renderAuthUI() {
   $("#collaborateGate").classList.toggle("hidden", connected);
   $("#collaborateContent").classList.toggle("hidden", !connected);
 
+  $("#accountGate").classList.toggle("hidden", connected);
+  $("#accountContent").classList.toggle("hidden", !connected);
+
   if (connected) {
     $("#welcomeText").textContent = `Welcome, ${(state.user.name || state.user.login).split(" ")[0]} 👋`;
   }
@@ -580,6 +631,10 @@ function switchView(viewName) {
   if (viewName === "collaborate" && state.token) {
     populateCollabRepoSelect();
   }
+  if (viewName === "account" && state.token) {
+    loadGistsList();
+    loadSshKeysList();
+  }
 }
 
 function closeMobileMenu() {
@@ -603,6 +658,7 @@ async function refreshRepos() {
     populateRepoSelect();
     populateExplorerRepoSelect();
     populateIssuesRepoSelect();
+    populateRepoLangFilter();
     renderRepoGrid();
     renderDashRecentRepos();
   } catch (err) {
@@ -682,6 +738,15 @@ function repoCardHtml(repo) {
   `;
 }
 
+function populateRepoLangFilter() {
+  const sel = $("#repoLangFilter");
+  if (!sel) return;
+  const currentVal = sel.value;
+  const langs = [...new Set(state.repos.map((r) => r.language).filter(Boolean))].sort();
+  sel.innerHTML = `<option value="">All languages</option>` + langs.map((l) => `<option value="${escapeAttr(l)}">${escapeHtml(l)}</option>`).join("");
+  if (langs.includes(currentVal)) sel.value = currentVal;
+}
+
 function renderRepoGrid() {
   const grid = $("#repoGrid");
   const empty = $("#repoEmptyState");
@@ -689,8 +754,16 @@ function renderRepoGrid() {
 
   const query = ($("#repoSearch")?.value || "").toLowerCase();
   const sortMode = $("#repoSortSelect")?.value || "updated";
+  const langFilter = $("#repoLangFilter")?.value || "";
+  const visFilter = $("#repoVisFilter")?.value || "";
+  const pinnedOnly = $("#repoPinnedFilter")?.checked || false;
 
   let list = state.repos.filter((r) => r.name.toLowerCase().includes(query));
+  if (langFilter) list = list.filter((r) => r.language === langFilter);
+  if (visFilter === "public") list = list.filter((r) => !r.private);
+  if (visFilter === "private") list = list.filter((r) => r.private);
+  if (pinnedOnly) list = list.filter((r) => isFavorite(r.full_name));
+
   if (sortMode === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
   else if (sortMode === "stars") list = [...list].sort((a, b) => b.stargazers_count - a.stargazers_count);
   else list = [...list].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
@@ -1090,6 +1163,10 @@ async function openRepoDetailModal(fullName) {
         <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-hub-teal text-hub-teal whitespace-nowrap" data-tab="readme">README</button>
         <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="commits">Commits</button>
         <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="branches">Branches</button>
+        <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="insights">Insights</button>
+        <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="releases">Releases</button>
+        <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="topics">Topics</button>
+        <button class="detailTab px-3.5 py-2 text-xs font-medium border-b-2 border-transparent text-hub-dim whitespace-nowrap" data-tab="danger">Settings</button>
       </div>
 
       <div id="detailTabReadme" class="detailTabPanel">
@@ -1101,6 +1178,16 @@ async function openRepoDetailModal(fullName) {
       <div id="detailTabBranches" class="detailTabPanel hidden">
         <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
       </div>
+      <div id="detailTabInsights" class="detailTabPanel hidden">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+      <div id="detailTabReleases" class="detailTabPanel hidden">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+      <div id="detailTabTopics" class="detailTabPanel hidden">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+      <div id="detailTabDanger" class="detailTabPanel hidden"></div>
     </div>
   `;
 
@@ -1179,6 +1266,10 @@ async function openRepoDetailModal(fullName) {
       await loadReadmeInto(root, repo);
       await loadCommitsInto(root, repo);
       await loadBranchesInto(root, repo);
+      await loadInsightsInto(root, repo);
+      await loadReleasesInto(root, repo);
+      await loadTopicsInto(root, repo);
+      loadDangerZoneInto(root, repo);
     },
   });
 }
@@ -1300,6 +1391,380 @@ function renderBranchList(root, repo, branches) {
         btn.disabled = false;
       }
     };
+  });
+}
+
+/* --- Insights: language breakdown, contributors, traffic --- */
+
+const LANGUAGE_COLORS = {
+  JavaScript: "#f1e05a", TypeScript: "#3178c6", Python: "#3572A5", Java: "#b07219",
+  HTML: "#e34c26", CSS: "#563d7c", Go: "#00ADD8", Rust: "#dea584", Ruby: "#701516",
+  PHP: "#4F5D95", "C++": "#f34b7d", C: "#555555", "C#": "#178600", Swift: "#F05138",
+  Kotlin: "#A97BFF", Shell: "#89e051", Dart: "#00B4AB", Vue: "#41b883",
+};
+function colorForLanguage(lang) {
+  return LANGUAGE_COLORS[lang] || "#7c8ba3";
+}
+
+async function loadInsightsInto(root, repo) {
+  const panel = $("#detailTabInsights", root);
+  panel.innerHTML = `
+    <div class="mb-5">
+      <h4 class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2.5">Language breakdown</h4>
+      <div id="insightsLangBar" class="h-2.5 rounded-full overflow-hidden flex bg-white/[0.05] mb-2.5"></div>
+      <div id="insightsLangLegend" class="flex flex-wrap gap-x-4 gap-y-1.5"></div>
+    </div>
+    <div>
+      <h4 class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-2.5">Top contributors</h4>
+      <div id="insightsContributors" class="space-y-2"></div>
+    </div>
+  `;
+  try {
+    const [langs, contributors] = await Promise.all([
+      ghFetch(`/repos/${repo.full_name}/languages`).catch(() => ({})),
+      ghFetch(`/repos/${repo.full_name}/contributors?per_page=10`).catch(() => []),
+    ]);
+
+    const langEntries = Object.entries(langs || {});
+    const totalBytes = langEntries.reduce((sum, [, v]) => sum + v, 0);
+    const bar = $("#insightsLangBar", root);
+    const legend = $("#insightsLangLegend", root);
+    if (langEntries.length === 0 || totalBytes === 0) {
+      bar.outerHTML = `<p class="text-xs text-hub-dim">No language data available.</p>`;
+    } else {
+      bar.innerHTML = langEntries.map(([lang, bytes]) => {
+        const pct = (bytes / totalBytes) * 100;
+        return `<div style="width:${pct.toFixed(2)}%;background:${colorForLanguage(lang)}" title="${escapeAttr(lang)}"></div>`;
+      }).join("");
+      legend.innerHTML = langEntries
+        .sort((a, b) => b[1] - a[1])
+        .map(([lang, bytes]) => {
+          const pct = ((bytes / totalBytes) * 100).toFixed(1);
+          return `<span class="flex items-center gap-1.5 text-xs text-hub-dim"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:${colorForLanguage(lang)}"></span>${escapeHtml(lang)} <span class="font-mono">${pct}%</span></span>`;
+        }).join("");
+    }
+
+    const contribWrap = $("#insightsContributors", root);
+    if (!contributors || contributors.length === 0) {
+      contribWrap.innerHTML = `<p class="text-xs text-hub-dim">No contributor data available.</p>`;
+    } else {
+      const maxCommits = Math.max(...contributors.map((c) => c.contributions || 0), 1);
+      contribWrap.innerHTML = contributors.map((c) => `
+        <div class="flex items-center gap-2.5">
+          <img src="${escapeAttr(c.avatar_url || "")}" alt="" class="w-6 h-6 rounded-full shrink-0">
+          <span class="text-xs font-mono w-28 truncate shrink-0">${escapeHtml(c.login || "unknown")}</span>
+          <div class="flex-1 h-1.5 rounded-full bg-white/[0.05] overflow-hidden">
+            <div class="h-full bg-hub-teal rounded-full" style="width:${((c.contributions || 0) / maxCommits * 100).toFixed(1)}%"></div>
+          </div>
+          <span class="text-[11px] font-mono text-hub-dim shrink-0">${c.contributions || 0}</span>
+        </div>
+      `).join("");
+    }
+  } catch (err) {
+    panel.innerHTML = `<p class="text-sm text-hub-coral text-center py-6">Failed to load insights: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+/* --- Releases --- */
+
+async function loadReleasesInto(root, repo) {
+  const panel = $("#detailTabReleases", root);
+  panel.innerHTML = `
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="text-xs font-mono uppercase tracking-wider text-hub-dim">Releases</h4>
+      <button id="btnNewRelease" type="button" class="flex items-center gap-1.5 bg-hub-teal text-hub-bg font-semibold px-3 py-1.5 rounded-lg text-xs hover:brightness-110 transition-all">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+        New release
+      </button>
+    </div>
+    <div id="releasesListWrap" class="space-y-2 max-h-64 overflow-y-auto">
+      <div class="flex items-center justify-center py-4"><span class="spinner text-hub-teal" style="width:18px;height:18px;"></span></div>
+    </div>
+  `;
+  $("#btnNewRelease", root).onclick = () => openNewReleaseModal(root, repo);
+  await refreshReleasesList(root, repo);
+}
+
+async function refreshReleasesList(root, repo) {
+  const wrap = $("#releasesListWrap", root);
+  try {
+    const releases = await ghFetch(`/repos/${repo.full_name}/releases?per_page=15`);
+    if (!releases || releases.length === 0) {
+      wrap.innerHTML = `<p class="text-xs text-hub-dim text-center py-4">No releases yet.</p>`;
+      return;
+    }
+    wrap.innerHTML = releases.map((r) => `
+      <div class="flex items-start gap-3 p-3 rounded-xl border border-hub-line bg-white/[0.02]">
+        <div class="w-8 h-8 rounded-lg ${r.prerelease ? "bg-hub-amber/15" : "bg-hub-teal/15"} flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 ${r.prerelease ? "text-hub-amber" : "text-hub-teal"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none"/></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium truncate">${escapeHtml(r.name || r.tag_name)}</p>
+          <p class="text-[11px] text-hub-dim mt-0.5 font-mono">${escapeHtml(r.tag_name)} · ${timeAgo(r.published_at || r.created_at)}${r.prerelease ? " · pre-release" : ""}</p>
+        </div>
+        <button type="button" class="btnDeleteRelease text-hub-dim hover:text-hub-coral transition-colors shrink-0" data-id="${r.id}" aria-label="Delete release">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+        </button>
+      </div>
+    `).join("");
+    $all(".btnDeleteRelease", wrap).forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm("Delete this release? The git tag itself will remain.")) return;
+        btn.disabled = true;
+        try {
+          await ghFetch(`/repos/${repo.full_name}/releases/${btn.dataset.id}`, { method: "DELETE" });
+          toast("Release deleted", "success");
+          await refreshReleasesList(root, repo);
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+        }
+      };
+    });
+  } catch (err) {
+    wrap.innerHTML = `<p class="text-xs text-hub-coral text-center py-4">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function openNewReleaseModal(parentRoot, repo) {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">New Release</h2>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Tag name</label>
+          <input id="releaseTag" type="text" placeholder="v1.0.0" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        </div>
+        <div>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Release title</label>
+          <input id="releaseTitle" type="text" placeholder="Version 1.0.0" maxlength="256" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        </div>
+        <div>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Release notes (optional)</label>
+          <textarea id="releaseBody" rows="4" placeholder="What changed in this release..." class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50"></textarea>
+        </div>
+        <label class="flex items-center gap-2.5 text-sm cursor-pointer">
+          <input id="releasePrerelease" type="checkbox" class="w-4 h-4 rounded accent-hub-teal">
+          Mark as pre-release
+        </label>
+      </div>
+      <button id="btnSubmitRelease" type="button" class="w-full mt-6 flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-hub-teal/20">
+        <span id="submitReleaseText">Publish Release</span>
+      </button>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      $("#releaseTag", root).focus();
+      $("#btnSubmitRelease", root).onclick = async () => {
+        const tag = $("#releaseTag", root).value.trim();
+        if (!tag) { toast("Tag name is required", "error"); return; }
+        const btn = $("#btnSubmitRelease", root);
+        const btnText = $("#submitReleaseText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+        try {
+          await ghFetch(`/repos/${repo.full_name}/releases`, {
+            method: "POST",
+            body: JSON.stringify({
+              tag_name: tag,
+              name: $("#releaseTitle", root).value.trim() || tag,
+              body: $("#releaseBody", root).value.trim() || undefined,
+              prerelease: $("#releasePrerelease", root).checked,
+            }),
+          });
+          logActivity("repo_create", `Release published: ${tag}`, repo.full_name);
+          toast(`Release "${tag}" published`, "success");
+          closeModal();
+          await refreshReleasesList(parentRoot, repo);
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+          btnText.textContent = "Publish Release";
+        }
+      };
+    },
+  });
+}
+
+/* --- Topics --- */
+
+async function loadTopicsInto(root, repo) {
+  const panel = $("#detailTabTopics", root);
+  panel.innerHTML = `
+    <p class="text-xs text-hub-dim mb-3">Topics help others discover this repository on GitHub.</p>
+    <div id="topicsChipWrap" class="flex flex-wrap gap-2 mb-4"></div>
+    <div class="flex gap-2">
+      <input id="newTopicInput" type="text" placeholder="add a topic (e.g. javascript)" autocomplete="off" spellcheck="false" class="flex-1 bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+      <button id="btnAddTopic" type="button" class="flex items-center gap-1.5 bg-hub-teal text-hub-bg font-semibold px-4 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all shrink-0">Add</button>
+    </div>
+  `;
+  let topics = [];
+  try {
+    const data = await ghFetch(`/repos/${repo.full_name}/topics`);
+    topics = data?.names || [];
+  } catch {
+    topics = [];
+  }
+  renderTopicChips(root, repo, topics);
+
+  $("#btnAddTopic", root).onclick = async () => {
+    const input = $("#newTopicInput", root);
+    const raw = input.value.trim().toLowerCase();
+    if (!raw) return;
+    if (!/^[a-z0-9-]+$/.test(raw)) { toast("Topics can only contain lowercase letters, numbers, and hyphens", "error"); return; }
+    if (topics.includes(raw)) { toast("Topic already added", "warn", 1800); return; }
+    topics = [...topics, raw];
+    input.value = "";
+    await saveTopics(root, repo, topics);
+  };
+}
+
+function renderTopicChips(root, repo, topics) {
+  const wrap = $("#topicsChipWrap", root);
+  if (topics.length === 0) {
+    wrap.innerHTML = `<p class="text-xs text-hub-dim italic">No topics added yet.</p>`;
+    return;
+  }
+  wrap.innerHTML = topics.map((t) => `
+    <span class="inline-flex items-center gap-1.5 bg-hub-teal/10 text-hub-teal border border-hub-teal/30 rounded-full px-3 py-1 text-xs font-mono">
+      ${escapeHtml(t)}
+      <button type="button" class="btnRemoveTopic hover:text-hub-coral transition-colors" data-topic="${escapeAttr(t)}" aria-label="Remove topic">
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </span>
+  `).join("");
+  $all(".btnRemoveTopic", wrap).forEach((btn) => {
+    btn.onclick = async () => {
+      const updated = topics.filter((t) => t !== btn.dataset.topic);
+      await saveTopics(root, repo, updated);
+    };
+  });
+}
+
+async function saveTopics(root, repo, topics) {
+  try {
+    await ghFetch(`/repos/${repo.full_name}/topics`, {
+      method: "PUT",
+      body: JSON.stringify({ names: topics }),
+    });
+    renderTopicChips(root, repo, topics);
+    toast("Topics updated", "success", 1800);
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+/* --- Danger zone: archive, template flag, transfer --- */
+
+function loadDangerZoneInto(root, repo) {
+  const panel = $("#detailTabDanger", root);
+  panel.innerHTML = `
+    <div class="space-y-3">
+      <div class="flex items-center justify-between gap-3 p-4 rounded-xl border border-hub-line bg-white/[0.02]">
+        <div>
+          <p class="text-sm font-medium">${repo.archived ? "Unarchive repository" : "Archive repository"}</p>
+          <p class="text-xs text-hub-dim mt-0.5">${repo.archived ? "Restore write access to this repository." : "Makes the repository read-only for everyone."}</p>
+        </div>
+        <button id="btnToggleArchive" type="button" class="border border-hub-line px-3.5 py-2 rounded-lg text-xs font-medium hover:bg-white/[0.05] transition-all shrink-0">${repo.archived ? "Unarchive" : "Archive"}</button>
+      </div>
+      <div class="flex items-center justify-between gap-3 p-4 rounded-xl border border-hub-line bg-white/[0.02]">
+        <div>
+          <p class="text-sm font-medium">${repo.is_template ? "Remove template flag" : "Mark as template"}</p>
+          <p class="text-xs text-hub-dim mt-0.5">Template repos let others generate new repos from this structure.</p>
+        </div>
+        <button id="btnToggleTemplate" type="button" class="border border-hub-line px-3.5 py-2 rounded-lg text-xs font-medium hover:bg-white/[0.05] transition-all shrink-0">${repo.is_template ? "Remove" : "Mark as template"}</button>
+      </div>
+      <div class="flex items-center justify-between gap-3 p-4 rounded-xl border border-hub-amber/20 bg-hub-amber/5">
+        <div>
+          <p class="text-sm font-medium">Transfer ownership</p>
+          <p class="text-xs text-hub-dim mt-0.5">Move this repository to another user or organization.</p>
+        </div>
+        <button id="btnTransferRepo" type="button" class="border border-hub-amber/30 text-hub-amber px-3.5 py-2 rounded-lg text-xs font-medium hover:bg-hub-amber/10 transition-all shrink-0">Transfer</button>
+      </div>
+    </div>
+  `;
+
+  $("#btnToggleArchive", root).onclick = async () => {
+    const btn = $("#btnToggleArchive", root);
+    const nextState = !repo.archived;
+    if (nextState && !confirm(`Archive "${repo.name}"? It will become read-only.`)) return;
+    btn.disabled = true;
+    try {
+      await ghFetch(`/repos/${repo.full_name}`, { method: "PATCH", body: JSON.stringify({ archived: nextState }) });
+      logActivity("visibility", `Repository ${nextState ? "archived" : "unarchived"}: ${repo.name}`);
+      toast(`"${repo.name}" ${nextState ? "archived" : "unarchived"}`, "success");
+      closeModal();
+      await refreshRepos();
+    } catch (err) {
+      toast(err.message, "error");
+      btn.disabled = false;
+    }
+  };
+
+  $("#btnToggleTemplate", root).onclick = async () => {
+    const btn = $("#btnToggleTemplate", root);
+    btn.disabled = true;
+    try {
+      await ghFetch(`/repos/${repo.full_name}`, { method: "PATCH", body: JSON.stringify({ is_template: !repo.is_template }) });
+      toast(`Template flag ${!repo.is_template ? "enabled" : "removed"}`, "success");
+      closeModal();
+      await refreshRepos();
+    } catch (err) {
+      toast(err.message, "error");
+      btn.disabled = false;
+    }
+  };
+
+  $("#btnTransferRepo", root).onclick = () => openTransferRepoModal(repo);
+}
+
+function openTransferRepoModal(repo) {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="w-12 h-12 rounded-full bg-hub-amber/15 flex items-center justify-center mb-4">
+        <svg class="w-6 h-6 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+      </div>
+      <h2 class="font-mono font-bold text-lg mb-1.5">Transfer repository</h2>
+      <p class="text-sm text-hub-dim mb-4 leading-relaxed">Transferring <strong class="text-hub-ink font-mono">${escapeHtml(repo.full_name)}</strong> moves it to another GitHub account or organization. You'll lose direct ownership immediately.</p>
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">New owner's username</label>
+      <input id="transferNewOwner" type="text" autocomplete="off" spellcheck="false" placeholder="username-or-org" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono mb-4 focus:outline-none focus:ring-2 focus:ring-hub-amber/50">
+      <div class="flex gap-3">
+        <button id="mCancel" type="button" class="flex-1 border border-hub-line py-3 rounded-xl text-sm font-medium hover:bg-white/[0.05] transition-all">Cancel</button>
+        <button id="btnConfirmTransfer" type="button" class="flex-1 bg-hub-amber text-hub-bg font-semibold py-3 rounded-xl hover:brightness-110 transition-all text-sm">Transfer</button>
+      </div>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mCancel", root).onclick = closeModal;
+      $("#transferNewOwner", root).focus();
+      $("#btnConfirmTransfer", root).onclick = async () => {
+        const newOwner = $("#transferNewOwner", root).value.trim();
+        if (!newOwner) { toast("Enter the new owner's username", "error"); return; }
+        const btn = $("#btnConfirmTransfer", root);
+        btn.disabled = true;
+        try {
+          await ghFetch(`/repos/${repo.full_name}/transfer`, {
+            method: "POST",
+            body: JSON.stringify({ new_owner: newOwner }),
+          });
+          logActivity("repo_delete", `Repository transferred: ${repo.name}`, `to ${newOwner}`);
+          toast(`Transfer of "${repo.name}" to ${newOwner} initiated`, "success");
+          closeModal();
+          await refreshRepos();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+        }
+      };
+    },
   });
 }
 
@@ -1584,6 +2049,26 @@ function renderExplorerList() {
 
 /* --- File preview / inline text editor --- */
 
+/** Minimal dependency-free syntax highlighter — enough for readability without pulling in a library. */
+function highlightCode(code, ext) {
+  const escaped = escapeHtml(code);
+  const rules = {
+    js: [[/(\/\/.*$)/gm, "cm"], [/(".*?"|'.*?'|`.*?`)/g, "st"], [/\b(function|const|let|var|return|if|else|for|while|class|import|export|from|async|await|new|this|try|catch|throw|typeof|null|undefined|true|false)\b/g, "kw"]],
+    ts: [[/(\/\/.*$)/gm, "cm"], [/(".*?"|'.*?'|`.*?`)/g, "st"], [/\b(function|const|let|var|return|if|else|for|while|class|import|export|from|async|await|new|this|try|catch|throw|typeof|interface|type|extends|implements|null|undefined|true|false)\b/g, "kw"]],
+    py: [[/(#.*$)/gm, "cm"], [/(".*?"|'.*?')/g, "st"], [/\b(def|return|if|elif|else|for|while|class|import|from|as|try|except|raise|with|lambda|None|True|False|self)\b/g, "kw"]],
+    json: [[/(".*?")\s*:/g, "kw"], [/:\s*(".*?")/g, "st"]],
+    css: [[/(\/\*[\s\S]*?\*\/)/g, "cm"], [/([.#][a-zA-Z0-9_-]+)/g, "kw"], [/(".*?"|'.*?')/g, "st"]],
+    html: [[/(&lt;!--[\s\S]*?--&gt;)/g, "cm"], [/(&lt;\/?[a-zA-Z0-9-]+)/g, "kw"]],
+  };
+  const set = rules[ext] || rules.js;
+  let out = escaped;
+  out = out.replace(/(&lt;!--[\s\S]*?--&gt;|\/\/.*$|#.*$|\/\*[\s\S]*?\*\/)/gm, (m) => `<span class="tok-cm">${m}</span>`);
+  out = out.replace(/(".*?"|'.*?'|`.*?`)/g, (m) => `<span class="tok-st">${m}</span>`);
+  const kwList = ["function","const","let","var","return","if","else","for","while","class","import","export","from","async","await","new","this","try","catch","throw","typeof","interface","type","extends","implements","def","elif","except","raise","with","lambda","self","null","undefined","true","false","None","True","False"];
+  out = out.replace(new RegExp(`\\b(${kwList.join("|")})\\b`, "g"), (m) => `<span class="tok-kw">${m}</span>`);
+  return out;
+}
+
 async function openFilePreviewModal(item) {
   const ext = (item.name.split(".").pop() || "").toLowerCase();
   const isEditable = TEXT_EDITABLE_EXTENSIONS.has(ext);
@@ -1596,9 +2081,17 @@ async function openFilePreviewModal(item) {
           <h2 class="font-mono font-bold text-base truncate">${escapeHtml(item.name)}</h2>
           <p class="text-xs text-hub-dim font-mono truncate">${escapeHtml(item.path)}</p>
         </div>
-        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors shrink-0 ml-3">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
-        </button>
+        <div class="flex items-center gap-1.5 shrink-0 ml-3">
+          <button id="btnFileHistory" type="button" class="w-8 h-8 flex items-center justify-center rounded-lg border border-hub-line hover:bg-white/[0.05] transition-all" aria-label="File history" title="View file history">
+            <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 106 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+          </button>
+          <button id="btnFileRename" type="button" class="w-8 h-8 flex items-center justify-center rounded-lg border border-hub-line hover:bg-white/[0.05] transition-all" aria-label="Rename or move file" title="Rename or move">
+            <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
       </div>
       <div id="filePreviewBody" class="min-h-[120px]">
         <div class="flex items-center justify-center py-10">
@@ -1612,6 +2105,8 @@ async function openFilePreviewModal(item) {
     wide: true,
     onMount: async (root) => {
       $("#mClose", root).onclick = closeModal;
+      $("#btnFileHistory", root).onclick = () => openFileHistoryModal(item);
+      $("#btnFileRename", root).onclick = () => openFileRenameModal(item);
       const body = $("#filePreviewBody", root);
 
       if (isImage) {
@@ -1643,7 +2138,11 @@ async function openFilePreviewModal(item) {
           return;
         }
         body.innerHTML = `
-          <textarea id="fileEditArea" spellcheck="false" class="w-full h-[45vh] bg-hub-deep border border-hub-line rounded-xl p-4 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 leading-relaxed"></textarea>
+          <div class="flex items-center gap-2 mb-2">
+            <button id="btnTogglePreviewMode" type="button" class="text-[11px] font-mono text-hub-teal hover:underline">Switch to plain edit mode</button>
+          </div>
+          <div id="highlightedView" class="w-full h-[45vh] bg-hub-deep border border-hub-line rounded-xl p-4 text-xs font-mono leading-relaxed overflow-auto"><pre class="whitespace-pre-wrap break-words"><code id="highlightedCode"></code></pre></div>
+          <textarea id="fileEditArea" spellcheck="false" class="hidden w-full h-[45vh] bg-hub-deep border border-hub-line rounded-xl p-4 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50 leading-relaxed"></textarea>
           <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block mt-4">Commit message</label>
           <input id="fileEditCommitMsg" type="text" placeholder="Update ${escapeAttr(item.name)}" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
           <div class="flex gap-3">
@@ -1654,7 +2153,21 @@ async function openFilePreviewModal(item) {
           </div>
         `;
         // Set value via property assignment (not innerHTML) to avoid any injection through file content.
-        $("#fileEditArea", root).value = decoded;
+        const editArea = $("#fileEditArea", root);
+        editArea.value = decoded;
+        $("#highlightedCode", root).innerHTML = highlightCode(decoded, ext);
+
+        let editMode = false;
+        const highlightedView = $("#highlightedView", root);
+        const toggleBtn = $("#btnTogglePreviewMode", root);
+        toggleBtn.onclick = () => {
+          editMode = !editMode;
+          highlightedView.classList.toggle("hidden", editMode);
+          editArea.classList.toggle("hidden", !editMode);
+          toggleBtn.textContent = editMode ? "Switch to highlighted view" : "Switch to plain edit mode";
+          if (editMode) editArea.focus();
+        };
+
         $("#btnDiscardFileEdit", root).onclick = closeModal;
         $("#btnSaveFileEdit", root).onclick = async () => {
           const btn = $("#btnSaveFileEdit", root);
@@ -1662,7 +2175,7 @@ async function openFilePreviewModal(item) {
           btn.disabled = true;
           btnText.innerHTML = `<span class="spinner"></span>`;
           try {
-            const newContent = $("#fileEditArea", root).value;
+            const newContent = editArea.value;
             const commitMsg = $("#fileEditCommitMsg", root).value.trim() || `Update ${item.name} via RepoHub`;
             await ghFetch(`/repos/${state.explorer.repoFullName}/contents/${encodeURI(item.path)}`, {
               method: "PUT",
@@ -1686,6 +2199,165 @@ async function openFilePreviewModal(item) {
       } catch (err) {
         body.innerHTML = `<p class="text-sm text-hub-coral text-center py-8">Failed to load file: ${escapeHtml(err.message)}</p>`;
       }
+    },
+  });
+}
+
+/* --- Per-file commit history --- */
+
+async function openFileHistoryModal(item) {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="min-w-0">
+          <h2 class="font-mono font-bold text-base truncate">History: ${escapeHtml(item.name)}</h2>
+          <p class="text-xs text-hub-dim font-mono truncate">${escapeHtml(item.path)}</p>
+        </div>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors shrink-0 ml-3">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="fileHistoryList" class="max-h-96 overflow-y-auto space-y-2">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+    </div>
+  `;
+  openModal(html, {
+    wide: true,
+    onMount: async (root) => {
+      $("#mClose", root).onclick = closeModal;
+      const listEl = $("#fileHistoryList", root);
+      try {
+        const commits = await ghFetch(`/repos/${state.explorer.repoFullName}/commits?path=${encodeURIComponent(item.path)}&per_page=25`);
+        if (!commits || commits.length === 0) {
+          listEl.innerHTML = `<p class="text-sm text-hub-dim text-center py-6">No history found for this file.</p>`;
+          return;
+        }
+        listEl.innerHTML = commits.map((c, idx) => {
+          const msg = (c.commit?.message || "").split("\n")[0];
+          const author = c.commit?.author?.name || c.author?.login || "unknown";
+          const date = c.commit?.author?.date;
+          return `
+            <div class="fileHistoryRow flex items-start gap-3 p-3 rounded-xl border border-hub-line bg-white/[0.02] cursor-pointer hover:bg-white/[0.04] transition-colors" data-sha="${escapeAttr(c.sha)}" data-idx="${idx}">
+              <img src="${escapeAttr(c.author?.avatar_url || "")}" alt="" class="w-7 h-7 rounded-full shrink-0 mt-0.5" onerror="this.style.visibility='hidden'">
+              <div class="min-w-0 flex-1">
+                <p class="text-xs font-medium truncate">${escapeHtml(msg)}</p>
+                <p class="text-[11px] text-hub-dim mt-0.5 font-mono">${escapeHtml(author)} · ${date ? timeAgo(date) : ""} · <span class="text-hub-cyan">${escapeHtml((c.sha || "").slice(0, 7))}</span></p>
+              </div>
+              <svg class="w-3.5 h-3.5 text-hub-dim shrink-0 mt-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+          `;
+        }).join("");
+        $all(".fileHistoryRow", listEl).forEach((row) => {
+          row.onclick = () => openFileVersionAtCommit(item, commits[Number(row.dataset.idx)]);
+        });
+      } catch (err) {
+        listEl.innerHTML = `<p class="text-sm text-hub-coral text-center py-6">Failed to load history: ${escapeHtml(err.message)}</p>`;
+      }
+    },
+  });
+}
+
+async function openFileVersionAtCommit(item, commit) {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="min-w-0">
+          <h2 class="font-mono font-bold text-base truncate">${escapeHtml(item.name)} <span class="text-hub-dim font-normal">@ ${escapeHtml((commit.sha || "").slice(0, 7))}</span></h2>
+          <p class="text-xs text-hub-dim truncate mt-0.5">${escapeHtml((commit.commit?.message || "").split("\n")[0])}</p>
+        </div>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors shrink-0 ml-3">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="fileVersionBody" class="min-h-[100px]">
+        <div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>
+      </div>
+    </div>
+  `;
+  openModal(html, {
+    wide: true,
+    onMount: async (root) => {
+      $("#mClose", root).onclick = closeModal;
+      const body = $("#fileVersionBody", root);
+      try {
+        const fileAtCommit = await ghFetch(`/repos/${state.explorer.repoFullName}/contents/${encodeURI(item.path)}?ref=${encodeURIComponent(commit.sha)}`);
+        const decoded = fileAtCommit.content ? base64ToUtf8(fileAtCommit.content) : null;
+        if (decoded === null) {
+          body.innerHTML = `<p class="text-sm text-hub-dim text-center py-6">This version is binary and can't be previewed.</p>`;
+          return;
+        }
+        const ext = (item.name.split(".").pop() || "").toLowerCase();
+        body.innerHTML = `<div class="bg-hub-deep border border-hub-line rounded-xl p-4 text-xs font-mono leading-relaxed max-h-96 overflow-auto"><pre class="whitespace-pre-wrap break-words"><code>${highlightCode(decoded, ext)}</code></pre></div>
+          <a href="${safeExternalUrl(commit.html_url)}" target="_blank" rel="noopener noreferrer" class="mt-4 w-full flex items-center justify-center gap-2 border border-hub-line py-2.5 rounded-xl text-sm font-medium hover:bg-white/[0.05] transition-all">View commit on GitHub</a>`;
+      } catch (err) {
+        body.innerHTML = `<p class="text-sm text-hub-coral text-center py-6">Failed to load this version: ${escapeHtml(err.message)}</p>`;
+      }
+    },
+  });
+}
+
+/* --- Rename / move a file --- */
+
+function openFileRenameModal(item) {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">Rename or Move</h2>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-hub-dim mb-4">Current path: <span class="font-mono text-hub-ink">${escapeHtml(item.path)}</span></p>
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">New path</label>
+      <input id="renameNewPath" type="text" value="${escapeAttr(item.path)}" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+      <p class="text-[11px] text-hub-dim mb-4">This creates the file at the new path and removes it from the old one, as two linked commits.</p>
+      <button id="btnConfirmRename" type="button" class="w-full flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 transition-all">
+        <span id="confirmRenameText">Rename / Move</span>
+      </button>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      const input = $("#renameNewPath", root);
+      input.focus();
+      input.setSelectionRange(0, input.value.lastIndexOf("."));
+      $("#btnConfirmRename", root).onclick = async () => {
+        const newPath = input.value.trim().replace(/^\/+/, "");
+        if (!newPath || newPath === item.path) { toast("Enter a different path", "error"); return; }
+        const btn = $("#btnConfirmRename", root);
+        const btnText = $("#confirmRenameText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+        try {
+          const fileData = await ghFetch(`/repos/${state.explorer.repoFullName}/contents/${encodeURI(item.path)}?ref=${encodeURIComponent(state.explorer.branch)}`);
+          await ghFetch(`/repos/${state.explorer.repoFullName}/contents/${encodeURI(newPath)}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              message: `Move ${item.path} to ${newPath} via RepoHub`,
+              content: fileData.content,
+              branch: state.explorer.branch,
+            }),
+          });
+          await ghFetch(`/repos/${state.explorer.repoFullName}/contents/${encodeURI(item.path)}`, {
+            method: "DELETE",
+            body: JSON.stringify({
+              message: `Remove old path ${item.path} after move via RepoHub`,
+              sha: item.sha,
+              branch: state.explorer.branch,
+            }),
+          });
+          logActivity("file_edit", `File moved: ${item.name}`, `${item.path} → ${newPath}`);
+          toast(`Moved to "${newPath}"`, "success");
+          closeModal();
+          await loadExplorerFolder();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+          btnText.textContent = "Rename / Move";
+        }
+      };
     },
   });
 }
@@ -1730,6 +2402,124 @@ function openExplorerFileDeleteModal(item) {
           toast(err.message, "error");
           btn.disabled = false;
           $("#fileDeleteBtnText", root).textContent = "Delete";
+        }
+      };
+    },
+  });
+}
+
+/* --- Create new file / folder --- */
+
+function openNewFileModal() {
+  if (!state.explorer.repoFullName) { toast("Select a repository first", "error"); return; }
+  const currentPath = currentExplorerPath();
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">New File</h2>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">File name</label>
+      <input id="newFileName" type="text" placeholder="example.txt" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono mb-1 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+      <p class="text-[11px] text-hub-dim mb-4">Will be created in: <span class="font-mono">${currentPath ? escapeHtml(currentPath) + "/" : "(repository root)"}</span></p>
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Initial content (optional)</label>
+      <textarea id="newFileContent" rows="6" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-xs font-mono mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50"></textarea>
+      <button id="btnCreateFile" type="button" class="w-full flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 transition-all">
+        <span id="createFileText">Create File</span>
+      </button>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      $("#newFileName", root).focus();
+      $("#btnCreateFile", root).onclick = async () => {
+        const name = $("#newFileName", root).value.trim();
+        if (!name) { toast("Enter a file name", "error"); return; }
+        if (/[\\<>:"|?*]/.test(name)) { toast("File name contains invalid characters", "error"); return; }
+        const fullPath = currentPath ? `${currentPath}/${name}` : name;
+        const btn = $("#btnCreateFile", root);
+        const btnText = $("#createFileText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+        try {
+          await ghFetch(`/repos/${state.explorer.repoFullName}/contents/${encodeURI(fullPath)}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              message: `Create ${fullPath} via RepoHub`,
+              content: utf8ToBase64($("#newFileContent", root).value || ""),
+              branch: state.explorer.branch,
+            }),
+          });
+          logActivity("file_edit", `File created: ${name}`, fullPath);
+          toast(`"${name}" created`, "success");
+          closeModal();
+          await loadExplorerFolder();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+          btnText.textContent = "Create File";
+        }
+      };
+    },
+  });
+}
+
+function openNewFolderModal() {
+  if (!state.explorer.repoFullName) { toast("Select a repository first", "error"); return; }
+  const currentPath = currentExplorerPath();
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">New Folder</h2>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Folder name</label>
+      <input id="newFolderName" type="text" placeholder="assets" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono mb-1 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+      <p class="text-[11px] text-hub-dim mb-4">Will be created in: <span class="font-mono">${currentPath ? escapeHtml(currentPath) + "/" : "(repository root)"}</span></p>
+      <p class="text-[11px] text-hub-amber mb-4 flex items-start gap-1.5">
+        <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        Git doesn't track empty folders — a placeholder <span class="font-mono">.gitkeep</span> file will be added inside so the folder appears immediately.
+      </p>
+      <button id="btnCreateFolder" type="button" class="w-full flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 transition-all">
+        <span id="createFolderText">Create Folder</span>
+      </button>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      $("#newFolderName", root).focus();
+      $("#btnCreateFolder", root).onclick = async () => {
+        const name = $("#newFolderName", root).value.trim();
+        if (!name) { toast("Enter a folder name", "error"); return; }
+        if (/[\\<>:"|?*]/.test(name)) { toast("Folder name contains invalid characters", "error"); return; }
+        const fullPath = currentPath ? `${currentPath}/${name}/.gitkeep` : `${name}/.gitkeep`;
+        const btn = $("#btnCreateFolder", root);
+        const btnText = $("#createFolderText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+        try {
+          await ghFetch(`/repos/${state.explorer.repoFullName}/contents/${encodeURI(fullPath)}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              message: `Create folder ${name} via RepoHub`,
+              content: utf8ToBase64(""),
+              branch: state.explorer.branch,
+            }),
+          });
+          logActivity("file_edit", `Folder created: ${name}`, fullPath);
+          toast(`"${name}" created`, "success");
+          closeModal();
+          await loadExplorerFolder();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+          btnText.textContent = "Create Folder";
         }
       };
     },
@@ -2348,8 +3138,201 @@ async function addWebhook(repoFullName, url) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* GLOBAL SEARCH: quick-jump across repos, code, issues                   */
+/* ACCOUNT: Gists & SSH Keys                                              */
 /* ---------------------------------------------------------------------- */
+
+function switchAccountTab(tabName) {
+  $all(".accountTab").forEach((t) => {
+    const active = t.dataset.tab === tabName;
+    t.classList.toggle("border-hub-teal", active);
+    t.classList.toggle("text-hub-teal", active);
+    t.classList.toggle("border-transparent", !active);
+    t.classList.toggle("text-hub-dim", !active);
+  });
+  $("#accountPanelGists").classList.toggle("hidden", tabName !== "gists");
+  $("#accountPanelKeys").classList.toggle("hidden", tabName !== "keys");
+}
+
+async function loadGistsList() {
+  const wrap = $("#gistsListWrap");
+  wrap.innerHTML = `<div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>`;
+  try {
+    const gists = await ghFetch(`/gists?per_page=30`);
+    if (!gists || gists.length === 0) {
+      wrap.innerHTML = `<div class="p-8 text-center text-sm text-hub-dim">No gists yet. Create your first one above.</div>`;
+      return;
+    }
+    wrap.innerHTML = gists.map((g, idx) => {
+      const files = Object.keys(g.files || {});
+      const firstFile = files[0] || "untitled";
+      return `
+        <div class="flex items-start gap-3 p-3.5">
+          <div class="w-8 h-8 rounded-lg ${g.public ? "bg-hub-teal/15" : "bg-hub-violet/15"} flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4 ${g.public ? "text-hub-teal" : "text-hub-violet"}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-mono truncate">${escapeHtml(g.description || firstFile)}</p>
+            <p class="text-[11px] text-hub-dim mt-0.5">${files.length} file${files.length === 1 ? "" : "s"} · ${g.public ? "Public" : "Secret"} · Updated ${timeAgo(g.updated_at)}</p>
+          </div>
+          <a href="${safeExternalUrl(g.html_url)}" target="_blank" rel="noopener noreferrer" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/[0.08] transition-all shrink-0 text-hub-dim hover:text-hub-teal" aria-label="Open gist">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+          </a>
+          <button type="button" class="btnDeleteGist w-8 h-8 flex items-center justify-center rounded-lg hover:bg-hub-coral/10 transition-all shrink-0 text-hub-dim hover:text-hub-coral" data-id="${escapeAttr(g.id)}" aria-label="Delete gist">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+          </button>
+        </div>
+      `;
+    }).join("");
+    $all(".btnDeleteGist", wrap).forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm("Delete this gist? This cannot be undone.")) return;
+        btn.disabled = true;
+        try {
+          await ghFetch(`/gists/${btn.dataset.id}`, { method: "DELETE" });
+          toast("Gist deleted", "success");
+          await loadGistsList();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+        }
+      };
+    });
+  } catch (err) {
+    wrap.innerHTML = `<div class="p-8 text-center text-sm text-hub-coral">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function openNewGistModal() {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">New Gist</h2>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Description (optional)</label>
+          <input id="gistDesc" type="text" placeholder="What is this gist for?" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        </div>
+        <div>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">File name</label>
+          <input id="gistFileName" type="text" placeholder="snippet.js" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        </div>
+        <div>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Content</label>
+          <textarea id="gistContent" rows="8" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50"></textarea>
+        </div>
+        <label class="flex items-center gap-2.5 text-sm cursor-pointer">
+          <input id="gistPublic" type="checkbox" class="w-4 h-4 rounded accent-hub-teal">
+          Make this gist public
+        </label>
+      </div>
+      <button id="btnSubmitGist" type="button" class="w-full mt-6 flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 transition-all">
+        <span id="submitGistText">Create Gist</span>
+      </button>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      $("#gistFileName", root).focus();
+      $("#btnSubmitGist", root).onclick = async () => {
+        const fileName = $("#gistFileName", root).value.trim();
+        const content = $("#gistContent", root).value;
+        if (!fileName) { toast("File name is required", "error"); return; }
+        if (!content.trim()) { toast("Gist content cannot be empty", "error"); return; }
+        const btn = $("#btnSubmitGist", root);
+        const btnText = $("#submitGistText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+        try {
+          await ghFetch(`/gists`, {
+            method: "POST",
+            body: JSON.stringify({
+              description: $("#gistDesc", root).value.trim() || undefined,
+              public: $("#gistPublic", root).checked,
+              files: { [fileName]: { content } },
+            }),
+          });
+          toast("Gist created", "success");
+          closeModal();
+          await loadGistsList();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+          btnText.textContent = "Create Gist";
+        }
+      };
+    },
+  });
+}
+
+async function loadSshKeysList() {
+  const wrap = $("#sshKeysListWrap");
+  wrap.innerHTML = `<div class="flex items-center justify-center py-8"><span class="spinner text-hub-teal" style="width:20px;height:20px;"></span></div>`;
+  try {
+    const keys = await ghFetch(`/user/keys`);
+    if (!keys || keys.length === 0) {
+      wrap.innerHTML = `<div class="p-8 text-center text-sm text-hub-dim">No SSH keys added yet.</div>`;
+      return;
+    }
+    wrap.innerHTML = keys.map((k) => `
+      <div class="flex items-center gap-3 p-3.5">
+        <div class="w-8 h-8 rounded-lg bg-hub-cyan/15 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4 text-hub-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium truncate">${escapeHtml(k.title || "Untitled key")}</p>
+          <p class="text-[11px] text-hub-dim font-mono truncate mt-0.5">${escapeHtml((k.key || "").slice(0, 40))}...</p>
+        </div>
+        <button type="button" class="btnDeleteSshKey text-hub-dim hover:text-hub-coral transition-colors shrink-0" data-id="${k.id}" aria-label="Delete key">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+        </button>
+      </div>
+    `).join("");
+    $all(".btnDeleteSshKey", wrap).forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm("Remove this SSH key from your account?")) return;
+        btn.disabled = true;
+        try {
+          await ghFetch(`/user/keys/${btn.dataset.id}`, { method: "DELETE" });
+          toast("SSH key removed", "success");
+          await loadSshKeysList();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+        }
+      };
+    });
+  } catch (err) {
+    wrap.innerHTML = `<div class="p-8 text-center text-sm text-hub-coral">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function addSshKey(title, keyValue) {
+  if (!title.trim()) { toast("Enter a key title", "error"); return; }
+  if (!/^(ssh-(rsa|ed25519|dss)|ecdsa-)/.test(keyValue.trim())) { toast("This doesn't look like a valid SSH public key", "error"); return; }
+  const btn = $("#btnAddSshKey");
+  btn.disabled = true;
+  try {
+    await ghFetch(`/user/keys`, {
+      method: "POST",
+      body: JSON.stringify({ title: title.trim(), key: keyValue.trim() }),
+    });
+    toast("SSH key added", "success");
+    $("#sshKeyTitle").value = "";
+    $("#sshKeyValue").value = "";
+    await loadSshKeysList();
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+
 
 function openGlobalSearchModal() {
   if (!state.token) { openTokenModal(); return; }
@@ -2874,7 +3857,6 @@ function clearStaged() {
 /* ---------------------------------------------------------------------- */
 
 function bindEvents() {
-  $("#btnThemeToggle").addEventListener("click", toggleTheme);
   $("#btnGlobalSearch").addEventListener("click", openGlobalSearchModal);
   $("#btnNotifications").addEventListener("click", openNotificationsModal);
 
@@ -2925,6 +3907,9 @@ function bindEvents() {
 
   $("#repoSearch").addEventListener("input", debounce(renderRepoGrid, 150));
   $("#repoSortSelect").addEventListener("change", renderRepoGrid);
+  $("#repoLangFilter").addEventListener("change", renderRepoGrid);
+  $("#repoVisFilter").addEventListener("change", renderRepoGrid);
+  $("#repoPinnedFilter").addEventListener("change", renderRepoGrid);
 
   // If files are already staged and the user then picks a repo, push right away.
   $("#targetRepoSelect").addEventListener("change", () => {
@@ -2945,6 +3930,8 @@ function bindEvents() {
     if (state.explorer.repoFullName) loadExplorerFolder();
     else toast("Select a repository first", "info", 2000);
   });
+  $("#btnExplorerNewFile").addEventListener("click", openNewFileModal);
+  $("#btnExplorerNewFolder").addEventListener("click", openNewFolderModal);
 
   // Issues
   $("#issuesRepoSelect").addEventListener("change", (e) => {
@@ -2984,6 +3971,15 @@ function bindEvents() {
   });
   $("#btnAddWebhook").addEventListener("click", () => {
     addWebhook(state.collaborate.repoFullName, $("#webhookUrl").value.trim());
+  });
+
+  // Account (Gists + SSH Keys)
+  $all(".accountTab").forEach((tab) => {
+    tab.addEventListener("click", () => switchAccountTab(tab.dataset.tab));
+  });
+  $("#btnNewGist").addEventListener("click", openNewGistModal);
+  $("#btnAddSshKey").addEventListener("click", () => {
+    addSshKey($("#sshKeyTitle").value, $("#sshKeyValue").value);
   });
 
   // Activity
@@ -3092,7 +4088,6 @@ function openWipeTokenConfirmModal() {
 
 async function init() {
   bindEvents();
-  loadTheme();
   loadFavorites();
   loadActivity();
   renderActivity();
