@@ -426,6 +426,60 @@ function deployStateBadge(readyState) {
   return map[readyState] || { label: capitalize((readyState || "unknown").toLowerCase()), cls: "text-hub-dim bg-white/5 border-hub-line" };
 }
 
+/** SHA1 hex digest of a buffer — Vercel's file upload API keys files by their SHA1. */
+async function sha1Hex(buffer) {
+  const digest = await crypto.subtle.digest("SHA-1", buffer);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Uploads one file's raw bytes to Vercel's file store ahead of deployment creation.
+ * Vercel dedupes by SHA1, so re-uploading identical content is cheap/idempotent.
+ */
+async function uploadFileToVercel(buffer, sha) {
+  await vFetch("/v2/files", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "x-vercel-digest": sha,
+    },
+    body: buffer,
+  });
+}
+
+/**
+ * Takes an array of { path, file } (from staged uploads or a ZIP) and deploys them
+ * directly to Vercel as a new deployment — no GitHub repo required. Framework may be
+ * left null to let Vercel auto-detect it from the uploaded structure (e.g. presence of
+ * package.json, index.html, etc).
+ */
+async function deployFilesToVercel(projectName, framework, fileEntries, onProgress) {
+  const files = [];
+  let done = 0;
+  for (const entry of fileEntries) {
+    const buffer = await entry.file.arrayBuffer();
+    const sha = await sha1Hex(buffer);
+    await uploadFileToVercel(buffer, sha);
+    files.push({ file: entry.path, sha, size: buffer.byteLength });
+    done++;
+    if (onProgress) onProgress(done, fileEntries.length);
+  }
+  const body = {
+    name: projectName,
+    target: "production",
+    files,
+    ...(framework ? { framework } : {}),
+  };
+  return vFetch("/v13/deployments", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+async function deleteVercelProject(projectId) {
+  return vFetch(`/v9/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+}
+
 /* ---------------------------------------------------------------------- */
 
 function arrayBufferToBase64(buffer) {
@@ -885,6 +939,9 @@ function vercelProjectCardHtml(project) {
         <a href="${safeExternalUrl(`https://${domain}`)}" target="_blank" rel="noopener noreferrer" class="w-8 h-8 flex items-center justify-center rounded-lg border border-hub-line hover:bg-white/[0.09] transition-all shrink-0" aria-label="Open live site" title="Open live site">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
         </a>
+        <button class="btnVercelDeleteProject w-8 h-8 flex items-center justify-center rounded-lg border border-hub-coral/30 text-hub-coral hover:bg-hub-coral/10 transition-all shrink-0" data-project-id="${escapeAttr(project.id)}" data-project-name="${escapeAttr(project.name)}" aria-label="Delete project" title="Delete project">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+        </button>
       </div>
     </div>
   `;
@@ -907,6 +964,57 @@ function renderVercelProjectsGrid() {
   });
   $all(".btnVercelRedeploy", grid).forEach((btn) => {
     btn.addEventListener("click", () => triggerVercelRedeploy(btn.dataset.projectId, btn.dataset.projectName));
+  });
+  $all(".btnVercelDeleteProject", grid).forEach((btn) => {
+    btn.addEventListener("click", () => openDeleteVercelProjectModal(btn.dataset.projectId, btn.dataset.projectName));
+  });
+}
+
+function openDeleteVercelProjectModal(projectId, projectName) {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="w-12 h-12 rounded-full bg-hub-coral/15 flex items-center justify-center mb-4">
+        <svg class="w-6 h-6 text-hub-coral" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+      </div>
+      <h2 class="font-mono font-bold text-lg mb-1.5">Delete "${escapeHtml(projectName)}"?</h2>
+      <p class="text-sm text-hub-dim mb-5 leading-relaxed">This removes the project and all its deployments from Vercel. This cannot be undone. Type the project name to confirm.</p>
+      <input id="confirmVercelDeleteName" type="text" placeholder="${escapeAttr(projectName)}" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-4 focus:outline-none focus:ring-2 focus:ring-hub-coral/50">
+      <div class="flex gap-3">
+        <button id="mCancel" type="button" class="flex-1 border border-hub-line py-3 rounded-xl text-sm font-medium hover:bg-white/[0.05] transition-all">Cancel</button>
+        <button id="btnConfirmDeleteVercel" type="button" disabled class="flex-1 bg-hub-coral text-white font-semibold py-3 rounded-xl hover:brightness-110 transition-all text-sm opacity-40 cursor-not-allowed">Delete Project</button>
+      </div>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mCancel", root).onclick = closeModal;
+      const input = $("#confirmVercelDeleteName", root);
+      const btn = $("#btnConfirmDeleteVercel", root);
+      input.addEventListener("input", () => {
+        const match = input.value.trim() === projectName;
+        btn.disabled = !match;
+        btn.classList.toggle("opacity-40", !match);
+        btn.classList.toggle("cursor-not-allowed", !match);
+      });
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner"></span>`;
+        try {
+          await deleteVercelProject(projectId);
+          logActivity("deploy", `Deleted Vercel project ${projectName}`, "Removed from Vercel");
+          toast(`"${projectName}" deleted from Vercel`, "success");
+          if (state.vercel.selectedProjectId === projectId) {
+            $("#vercelDeploymentsWrap").classList.add("hidden");
+            state.vercel.selectedProjectId = "";
+          }
+          closeModal();
+          await refreshVercelProjects();
+        } catch (err) {
+          toast(err.message, "error");
+          closeModal();
+        }
+      };
+    },
   });
 }
 
@@ -2341,10 +2449,98 @@ function openVercelTokenModal() {
   });
 }
 
-function openNewVercelDeployModal() {
-  if (state.repos.length === 0 && !state.token) {
-    // GitHub not connected — still allow deploying an existing/new project by name.
+/** In-memory staging for a Vercel file/ZIP deploy — cleared each time the modal opens. */
+const vercelDeployStage = { files: [] }; // { path, file, size }
+
+function vdStagedListHtml() {
+  if (vercelDeployStage.files.length === 0) {
+    return `<p class="text-xs text-hub-dim text-center py-4">No files added yet.</p>`;
   }
+  return vercelDeployStage.files.map((f, i) => `
+    <div class="flex items-center gap-2 px-3 py-2 text-xs font-mono border-b border-hub-line last:border-b-0">
+      <svg class="w-3.5 h-3.5 text-hub-dim shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+      <span class="truncate flex-1">${escapeHtml(f.path)}</span>
+      <span class="text-hub-dim/70 shrink-0">${fmtBytes(f.size)}</span>
+      <button type="button" class="vdRemoveFile text-hub-coral hover:text-hub-coral/70 shrink-0" data-idx="${i}" aria-label="Remove file">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+  `).join("");
+}
+
+function refreshVdStagedList(root) {
+  const wrap = $("#vdStagedWrap", root);
+  if (!wrap) return;
+  wrap.innerHTML = vdStagedListHtml();
+  $all(".vdRemoveFile", wrap).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      vercelDeployStage.files.splice(Number(btn.dataset.idx), 1);
+      refreshVdStagedList(root);
+      updateVdStagedCount(root);
+    });
+  });
+  updateVdStagedCount(root);
+}
+
+function updateVdStagedCount(root) {
+  const el = $("#vdStagedCount", root);
+  if (el) el.textContent = `${vercelDeployStage.files.length} file${vercelDeployStage.files.length === 1 ? "" : "s"} staged`;
+}
+
+async function vdAddFiles(fileList, root) {
+  for (const file of Array.from(fileList)) {
+    const relPath = file.webkitRelativePath || file.name;
+    vercelDeployStage.files.push({ path: relPath, file, size: file.size });
+  }
+  refreshVdStagedList(root);
+}
+
+async function vdAddZip(zipFile, root) {
+  if (typeof JSZip === "undefined") {
+    toast("Could not load the ZIP library. Check your connection and reload the page.", "error");
+    return;
+  }
+  toast(`Extracting ${zipFile.name}...`, "info", 2200);
+  try {
+    const zip = await JSZip.loadAsync(zipFile);
+    const entries = Object.values(zip.files).filter((e) => !e.dir);
+    if (entries.length === 0) {
+      toast("The ZIP file is empty", "warn");
+      return;
+    }
+    // Strip a common single top-level folder (e.g. "my-site/") so the site structure
+    // (index.html, css/, js/...) lands at the deployment root, matching how site ZIPs
+    // are normally packaged.
+    const parts = entries.map((e) => e.name.split("/"));
+    const allShareRoot = parts.length > 0 && parts.every((p) => p.length > 1 && p[0] === parts[0][0]);
+    for (const entry of entries) {
+      const blob = await entry.async("blob");
+      let path = entry.name;
+      if (allShareRoot) path = path.split("/").slice(1).join("/");
+      if (!path) continue;
+      const file = new File([blob], path.split("/").pop(), { type: blob.type || "application/octet-stream" });
+      vercelDeployStage.files.push({ path, file, size: blob.size });
+    }
+    refreshVdStagedList(root);
+    toast(`${entries.length} file${entries.length === 1 ? "" : "s"} extracted from ${zipFile.name}`, "success");
+  } catch (err) {
+    toast("Failed to extract ZIP: " + err.message, "error");
+  }
+}
+
+function switchVdSourceTab(tabName, root) {
+  $all(".vdSourceTab", root).forEach((tab) => {
+    const active = tab.dataset.tab === tabName;
+    tab.classList.toggle("border-hub-teal", active);
+    tab.classList.toggle("text-hub-teal", active);
+    tab.classList.toggle("border-transparent", !active);
+    tab.classList.toggle("text-hub-dim", !active);
+  });
+  $all(".vdSourcePanel", root).forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== tabName));
+}
+
+function openNewVercelDeployModal() {
+  vercelDeployStage.files = [];
   const repoOptions = state.repos.map((r) => `<option value="${escapeAttr(r.full_name)}">${escapeHtml(r.full_name)}</option>`).join("");
   const frameworkOptions = VERCEL_FRAMEWORKS.map((f) => `<option value="${escapeAttr(f.id || "")}">${escapeHtml(f.label)}</option>`).join("");
 
@@ -2357,26 +2553,68 @@ function openNewVercelDeployModal() {
         </button>
       </div>
 
-      ${state.repos.length > 0 ? `
-        <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">GitHub repository</label>
-        <select id="vdRepoSelect" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
-          <option value="">— select repository —</option>
-          ${repoOptions}
-        </select>
-      ` : `
-        <p class="text-xs text-hub-amber mb-3 leading-relaxed">Connect GitHub first to deploy directly from a repository. You can still name a new project below and link a repo to it later from Vercel's dashboard.</p>
-      `}
+      <div class="flex items-center gap-1 mb-4 overflow-x-auto whitespace-nowrap border-b border-hub-line">
+        <button type="button" class="vdSourceTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-hub-teal text-hub-teal shrink-0" data-tab="github">GitHub Repo</button>
+        <button type="button" class="vdSourceTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-transparent text-hub-dim shrink-0" data-tab="files">Upload Files</button>
+        <button type="button" class="vdSourceTab px-3.5 py-2.5 text-xs font-medium border-b-2 border-transparent text-hub-dim shrink-0" data-tab="zip">Upload ZIP</button>
+      </div>
 
-      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Project name</label>
+      <div class="vdSourcePanel" data-panel="github">
+        ${state.repos.length > 0 ? `
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">GitHub repository</label>
+          <select id="vdRepoSelect" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+            <option value="">— select repository —</option>
+            ${repoOptions}
+          </select>
+          <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Branch</label>
+          <input id="vdBranch" type="text" placeholder="main" value="main" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-1 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        ` : `
+          <p class="text-xs text-hub-amber leading-relaxed">Connect GitHub first to deploy from a repository — or use "Upload Files" / "Upload ZIP" instead, which don't need GitHub at all.</p>
+        `}
+      </div>
+
+      <div class="vdSourcePanel hidden" data-panel="files">
+        <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Website files</label>
+        <p class="text-[11px] text-hub-dim mb-2 leading-relaxed">Pick any mix of HTML, CSS, JS, images, or a whole project folder (e.g. a Vite/Next.js build output). Structure is preserved.</p>
+        <div class="flex gap-2 mb-3">
+          <button id="vdBtnPickFiles" type="button" class="flex-1 flex items-center justify-center gap-2 border border-dashed border-hub-line rounded-xl py-3 text-xs font-medium hover:bg-white/[0.04] transition-all">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+            Pick Files
+          </button>
+          <button id="vdBtnPickFolder" type="button" class="flex-1 flex items-center justify-center gap-2 border border-dashed border-hub-line rounded-xl py-3 text-xs font-medium hover:bg-white/[0.04] transition-all">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            Pick Folder
+          </button>
+        </div>
+        <input id="vdFileInputMulti" type="file" multiple class="hidden">
+        <input id="vdFileInputFolder" type="file" webkitdirectory directory multiple class="hidden">
+      </div>
+
+      <div class="vdSourcePanel hidden" data-panel="zip">
+        <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Website ZIP archive</label>
+        <p class="text-[11px] text-hub-dim mb-2 leading-relaxed">Upload a .zip containing your site (index.html at the root, or one top-level folder). It's extracted automatically before deploying.</p>
+        <button id="vdBtnPickZip" type="button" class="w-full flex items-center justify-center gap-2 border border-dashed border-hub-line rounded-xl py-3 text-xs font-medium hover:bg-white/[0.04] transition-all">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h1M9 13h1M9 17h1"/></svg>
+          Pick ZIP File
+        </button>
+        <input id="vdFileInputZip" type="file" accept=".zip" class="hidden">
+      </div>
+
+      <div id="vdStagedSection" class="hidden mt-1 mb-4">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-mono uppercase tracking-wider text-hub-dim">Staged</span>
+          <span id="vdStagedCount" class="text-[11px] text-hub-dim font-mono">0 files staged</span>
+        </div>
+        <div id="vdStagedWrap" class="rounded-xl border border-hub-line bg-hub-deep max-h-40 overflow-y-auto"></div>
+      </div>
+
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block mt-3">Project name</label>
       <input id="vdProjectName" type="text" placeholder="my-app" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
 
       <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Framework <span class="normal-case text-hub-dim/70">(auto-detected if left as-is)</span></label>
-      <select id="vdFramework" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+      <select id="vdFramework" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
         ${frameworkOptions}
       </select>
-
-      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Branch</label>
-      <input id="vdBranch" type="text" placeholder="main" value="main" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
 
       <button id="btnSubmitVercelDeploy" type="button" class="w-full flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-hub-teal/20">
         <span id="submitVercelDeployText">Deploy</span>
@@ -2387,6 +2625,16 @@ function openNewVercelDeployModal() {
   openModal(html, {
     onMount: (root) => {
       $("#mClose", root).onclick = closeModal;
+      let sourceMode = "github";
+
+      $all(".vdSourceTab", root).forEach((tab) => {
+        tab.addEventListener("click", () => {
+          sourceMode = tab.dataset.tab;
+          switchVdSourceTab(sourceMode, root);
+          $("#vdStagedSection", root).classList.toggle("hidden", sourceMode === "github");
+        });
+      });
+
       const repoSelect = $("#vdRepoSelect", root);
       if (repoSelect) {
         repoSelect.addEventListener("change", () => {
@@ -2396,11 +2644,43 @@ function openNewVercelDeployModal() {
           }
         });
       }
+
+      $("#vdBtnPickFiles", root).addEventListener("click", () => $("#vdFileInputMulti", root).click());
+      $("#vdBtnPickFolder", root).addEventListener("click", () => $("#vdFileInputFolder", root).click());
+      $("#vdBtnPickZip", root).addEventListener("click", () => $("#vdFileInputZip", root).click());
+
+      $("#vdFileInputMulti", root).addEventListener("change", async (e) => {
+        if (e.target.files.length) {
+          await vdAddFiles(e.target.files, root);
+          $("#vdStagedSection", root).classList.remove("hidden");
+          if (!$("#vdProjectName", root).value) $("#vdProjectName", root).value = "my-site";
+        }
+        e.target.value = "";
+      });
+      $("#vdFileInputFolder", root).addEventListener("change", async (e) => {
+        if (e.target.files.length) {
+          await vdAddFiles(e.target.files, root);
+          $("#vdStagedSection", root).classList.remove("hidden");
+          const firstPath = e.target.files[0].webkitRelativePath || "";
+          const folderName = firstPath.split("/")[0];
+          if (folderName && !$("#vdProjectName", root).value) $("#vdProjectName", root).value = folderName;
+        }
+        e.target.value = "";
+      });
+      $("#vdFileInputZip", root).addEventListener("change", async (e) => {
+        if (e.target.files[0]) {
+          await vdAddZip(e.target.files[0], root);
+          $("#vdStagedSection", root).classList.remove("hidden");
+          if (!$("#vdProjectName", root).value) {
+            $("#vdProjectName", root).value = e.target.files[0].name.replace(/\.zip$/i, "");
+          }
+        }
+        e.target.value = "";
+      });
+
       $("#btnSubmitVercelDeploy", root).onclick = async () => {
         const projectName = $("#vdProjectName", root).value.trim();
         const framework = $("#vdFramework", root).value || null;
-        const branch = $("#vdBranch", root).value.trim() || "main";
-        const repoFullName = repoSelect ? repoSelect.value : "";
 
         if (!projectName) {
           toast("Enter a project name", "error");
@@ -2414,26 +2694,34 @@ function openNewVercelDeployModal() {
         const btn = $("#btnSubmitVercelDeploy", root);
         const btnText = $("#submitVercelDeployText", root);
         btn.disabled = true;
-        btnText.innerHTML = `<span class="spinner"></span>`;
 
         try {
-          const body = {
-            name: projectName,
-            target: "production",
-            ...(framework ? { framework } : {}),
-          };
-          if (repoFullName) {
+          if (sourceMode === "github") {
+            const branch = $("#vdBranch", root)?.value.trim() || "main";
+            const repoFullName = repoSelect ? repoSelect.value : "";
+            if (!repoFullName) throw new Error("Select a GitHub repository to deploy from.");
+            btnText.innerHTML = `<span class="spinner"></span>`;
             const [owner, repoName] = repoFullName.split("/");
-            body.gitSource = { type: "github", org: owner, repo: repoName, ref: branch };
+            await vFetch("/v13/deployments", {
+              method: "POST",
+              body: JSON.stringify({
+                name: projectName,
+                target: "production",
+                ...(framework ? { framework } : {}),
+                gitSource: { type: "github", org: owner, repo: repoName, ref: branch },
+              }),
+            });
           } else {
-            throw new Error("Select a GitHub repository to deploy from, or connect one in Vercel's dashboard first.");
+            if (vercelDeployStage.files.length === 0) {
+              throw new Error(sourceMode === "zip" ? "Pick a ZIP file first." : "Add at least one file first.");
+            }
+            await deployFilesToVercel(projectName, framework, vercelDeployStage.files, (done, total) => {
+              btnText.innerHTML = `<span class="spinner"></span> Uploading ${done}/${total}`;
+            });
           }
-          await vFetch("/v13/deployments", {
-            method: "POST",
-            body: JSON.stringify(body),
-          });
-          logActivity("deploy", `Deployed ${projectName} to Vercel`, framework ? frameworkLabel(framework) : "Framework auto-detected");
+          logActivity("deploy", `Deployed ${projectName} to Vercel`, sourceMode === "github" ? "From GitHub repository" : `From ${sourceMode === "zip" ? "ZIP upload" : "file upload"} (${vercelDeployStage.files.length} files)`);
           toast(`Deployment started for ${projectName}`, "success");
+          vercelDeployStage.files = [];
           closeModal();
           await refreshVercelProjects();
         } catch (err) {
