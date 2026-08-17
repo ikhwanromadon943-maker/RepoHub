@@ -11,11 +11,31 @@
 "use strict";
 
 const GH_API = "https://api.github.com";
+const VC_API = "https://api.vercel.com";
 const LS_TOKEN_KEY = "repohub_token";
+const LS_VERCEL_TOKEN_KEY = "repohub_vercel_token";
+const LS_VERCEL_TEAM_KEY = "repohub_vercel_team";
 const LS_ACTIVITY_KEY = "repohub_activity";
 const LS_FAVORITES_KEY = "repohub_favorites";
 const LS_ONBOARDING_KEY = "repohub_onboarding_seen";
-const ALLOWED_HOSTS = new Set(["github.com", "api.github.com", "raw.githubusercontent.com", "githubusercontent.com"]);
+const ALLOWED_HOSTS = new Set(["github.com", "api.github.com", "raw.githubusercontent.com", "githubusercontent.com", "vercel.com", "api.vercel.com"]);
+
+// Frameworks Vercel auto-detects out of the box (mirrors Vercel's own project framework list — informational only, presented in the UI).
+const VERCEL_FRAMEWORKS = [
+  { id: "nextjs", label: "Next.js" },
+  { id: "vite", label: "Vite" },
+  { id: "nuxtjs", label: "Nuxt" },
+  { id: "sveltekit", label: "SvelteKit" },
+  { id: "astro", label: "Astro" },
+  { id: "remix", label: "Remix" },
+  { id: "gatsby", label: "Gatsby" },
+  { id: "create-react-app", label: "Create React App" },
+  { id: "vue", label: "Vue" },
+  { id: "angular", label: "Angular" },
+  { id: "hugo", label: "Hugo" },
+  { id: "gridsome", label: "Gridsome" },
+  { id: null, label: "Static / Other" },
+];
 
 const state = {
   token: null,
@@ -54,6 +74,14 @@ const state = {
   collaborate: {
     repoFullName: "",
     activeTab: "pulls",
+  },
+  vercel: {
+    token: null,
+    teamId: null,
+    user: null,
+    projects: [],
+    selectedProjectId: "",
+    deployments: [],
   },
 };
 
@@ -334,6 +362,72 @@ async function ghFetch(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+/* ---------------------------------------------------------------------- */
+/* Vercel: fetch helper                                                   */
+/* ---------------------------------------------------------------------- */
+
+/** Appends the active team scope to a Vercel API path, if one is set. */
+function vScoped(path) {
+  if (!state.vercel.teamId) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}teamId=${encodeURIComponent(state.vercel.teamId)}`;
+}
+
+async function vFetch(path, options = {}) {
+  if (!state.vercel.token) throw new Error("Not connected to Vercel");
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    throw new Error("You're offline. This will retry automatically once reconnected.");
+  }
+  let res;
+  try {
+    res = await fetch(`${VC_API}${vScoped(path)}`, {
+      ...options,
+      referrerPolicy: "no-referrer",
+      headers: {
+        Authorization: `Bearer ${state.vercel.token}`,
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {}),
+      },
+    });
+  } catch {
+    throw new Error("Could not reach Vercel. Check your internet connection.");
+  }
+  if (!res.ok) {
+    let msg = `Vercel API error (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error?.message) msg = data.error.message;
+    } catch { /* body wasn't JSON — keep default message */ }
+    if (res.status === 401 || res.status === 403) msg = "Vercel token is invalid, expired, or lacks access to this resource";
+    if (res.status === 404) msg = "Not found on Vercel (404)";
+    if (res.status === 429) msg = "Vercel rate limit reached — try again shortly";
+    throw new Error(msg);
+  }
+  if (res.status === 204) return null;
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function frameworkLabel(id) {
+  const match = VERCEL_FRAMEWORKS.find((f) => f.id === id);
+  return match ? match.label : (id ? capitalize(id) : "Static / Other");
+}
+
+function deployStateBadge(readyState) {
+  const map = {
+    READY: { label: "Ready", cls: "text-hub-teal bg-hub-teal/10 border-hub-teal/30" },
+    ERROR: { label: "Error", cls: "text-hub-coral bg-hub-coral/10 border-hub-coral/30" },
+    BUILDING: { label: "Building", cls: "text-hub-amber bg-hub-amber/10 border-hub-amber/30" },
+    INITIALIZING: { label: "Initializing", cls: "text-hub-amber bg-hub-amber/10 border-hub-amber/30" },
+    QUEUED: { label: "Queued", cls: "text-hub-cyan bg-hub-cyan/10 border-hub-cyan/30" },
+    CANCELED: { label: "Canceled", cls: "text-hub-dim bg-white/5 border-hub-line" },
+  };
+  return map[readyState] || { label: capitalize((readyState || "unknown").toLowerCase()), cls: "text-hub-dim bg-white/5 border-hub-line" };
+}
+
+/* ---------------------------------------------------------------------- */
+
 function arrayBufferToBase64(buffer) {
   let binary = "";
   const bytes = new Uint8Array(buffer);
@@ -421,6 +515,110 @@ function logout() {
   renderAuthUI();
   switchView("dashboard");
   toast("You've been logged out of RepoHub", "info");
+}
+
+/* ---------------------------------------------------------------------- */
+/* Vercel: connect / logout                                               */
+/* ---------------------------------------------------------------------- */
+
+function looksLikeVercelToken(v) {
+  return /^[A-Za-z0-9_]{20,255}$/.test(v);
+}
+
+async function connectWithVercelToken(token, teamId = "") {
+  const cleaned = (token || "").trim();
+  const cleanedTeam = (teamId || "").trim();
+  if (!cleaned) {
+    toast("Token cannot be empty", "error");
+    return false;
+  }
+  if (!looksLikeVercelToken(cleaned)) {
+    toast("This doesn't look like a valid Vercel token", "error");
+    return false;
+  }
+  try {
+    const qs = cleanedTeam ? `?teamId=${encodeURIComponent(cleanedTeam)}` : "";
+    const res = await fetch(`${VC_API}/v2/user${qs}`, {
+      referrerPolicy: "no-referrer",
+      headers: {
+        Authorization: `Bearer ${cleaned}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) throw new Error("Invalid token. Double-check and try again.");
+      throw new Error(`Could not verify token (${res.status})`);
+    }
+    const data = await res.json();
+    state.vercel.token = cleaned;
+    state.vercel.teamId = cleanedTeam || null;
+    state.vercel.user = data.user || data;
+    try {
+      localStorage.setItem(LS_VERCEL_TOKEN_KEY, cleaned);
+      if (cleanedTeam) localStorage.setItem(LS_VERCEL_TEAM_KEY, cleanedTeam);
+      else localStorage.removeItem(LS_VERCEL_TEAM_KEY);
+    } catch { /* storage unavailable */ }
+    logActivity("connect", "Connected to Vercel", `Signed in as ${state.vercel.user.username || state.vercel.user.email || "Vercel account"}`);
+    toast(`Connected to Vercel as ${state.vercel.user.username || state.vercel.user.email}`, "success");
+    await onVercelConnected();
+    return true;
+  } catch (err) {
+    toast(err.message || "Could not connect to Vercel", "error");
+    return false;
+  }
+}
+
+async function onVercelConnected() {
+  renderVercelAuthUI();
+  await refreshVercelProjects();
+}
+
+function vercelLogout() {
+  state.vercel.token = null;
+  state.vercel.user = null;
+  state.vercel.teamId = null;
+  state.vercel.projects = [];
+  state.vercel.deployments = [];
+  state.vercel.selectedProjectId = "";
+  try {
+    localStorage.removeItem(LS_VERCEL_TOKEN_KEY);
+    localStorage.removeItem(LS_VERCEL_TEAM_KEY);
+  } catch {}
+  closeModal();
+  renderVercelAuthUI();
+  toast("Disconnected from Vercel", "info");
+}
+
+async function tryAutoConnectVercel() {
+  let saved = null;
+  let savedTeam = null;
+  try {
+    saved = localStorage.getItem(LS_VERCEL_TOKEN_KEY);
+    savedTeam = localStorage.getItem(LS_VERCEL_TEAM_KEY);
+  } catch { /* storage unavailable */ }
+  if (!saved) {
+    renderVercelAuthUI();
+    return;
+  }
+  try {
+    const qs = savedTeam ? `?teamId=${encodeURIComponent(savedTeam)}` : "";
+    const res = await fetch(`${VC_API}/v2/user${qs}`, {
+      referrerPolicy: "no-referrer",
+      headers: { Authorization: `Bearer ${saved}`, Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error("stale token");
+    const data = await res.json();
+    state.vercel.token = saved;
+    state.vercel.teamId = savedTeam || null;
+    state.vercel.user = data.user || data;
+    await onVercelConnected();
+  } catch {
+    try {
+      localStorage.removeItem(LS_VERCEL_TOKEN_KEY);
+      localStorage.removeItem(LS_VERCEL_TEAM_KEY);
+    } catch {}
+    renderVercelAuthUI();
+  }
 }
 
 function maybeShowOnboarding() {
@@ -600,6 +798,187 @@ function renderSecurityInfo() {
     scopeEl.textContent = state.tokenScopes.join(", ");
     scopeEl.className = `font-mono font-semibold ${hasRepo ? "text-hub-teal" : "text-hub-amber"}`;
   }
+
+  const vEl = $("#secVercelStatus");
+  if (vEl) {
+    const vConnected = !!state.vercel.token && !!state.vercel.user;
+    vEl.textContent = vConnected ? `Connected as ${state.vercel.user.username || state.vercel.user.email}` : "Not connected";
+    vEl.className = `font-mono font-semibold ${vConnected ? "text-hub-teal" : "text-hub-dim"}`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Render: Vercel-dependent UI                                            */
+/* ---------------------------------------------------------------------- */
+
+function renderVercelAuthUI() {
+  const connected = !!state.vercel.token && !!state.vercel.user;
+
+  $("#vercelGate").classList.toggle("hidden", connected);
+  $("#vercelContent").classList.toggle("hidden", !connected);
+
+  const dot = $("#vercelConnDot");
+  const text = $("#vercelConnText");
+  if (dot && text) {
+    if (connected) {
+      dot.className = "absolute inline-flex h-full w-full rounded-full bg-hub-teal";
+      text.textContent = state.vercel.user.username ? `@${state.vercel.user.username}` : (state.vercel.user.email || "Connected");
+      text.classList.remove("text-hub-dim");
+      text.classList.add("text-hub-teal");
+    } else {
+      dot.className = "absolute inline-flex h-full w-full rounded-full bg-hub-coral";
+      text.textContent = "Vercel not connected";
+      text.classList.add("text-hub-dim");
+      text.classList.remove("text-hub-teal");
+    }
+  }
+
+  if (connected) {
+    const avatarEl = $("#vercelUserAvatar");
+    if (state.vercel.user.avatar) {
+      avatarEl.src = `https://vercel.com/api/www/avatar/${state.vercel.user.avatar}?s=64`;
+      avatarEl.classList.remove("hidden");
+    } else {
+      avatarEl.classList.add("hidden");
+    }
+    $("#vercelUserName").textContent = state.vercel.user.name || state.vercel.user.username || state.vercel.user.email || "Vercel account";
+    $("#vercelUserScope").textContent = state.vercel.teamId ? `Team scope: ${state.vercel.teamId}` : (state.vercel.user.username ? `@${state.vercel.user.username}` : state.vercel.user.email || "");
+  }
+
+  renderSecurityInfo();
+}
+
+async function refreshVercelProjects() {
+  try {
+    const data = await vFetch("/v9/projects?limit=100");
+    state.vercel.projects = data?.projects || [];
+    renderVercelProjectsGrid();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+function vercelProjectCardHtml(project) {
+  const domain = project.targets?.production?.alias?.[0] || project.alias?.[0]?.domain || `${project.name}.vercel.app`;
+  const framework = frameworkLabel(project.framework);
+  const latest = project.latestDeployments?.[0];
+  const badge = latest ? deployStateBadge(latest.readyState || latest.state) : null;
+  return `
+    <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-4 sm:p-5 flex flex-col" data-project-id="${escapeAttr(project.id)}">
+      <div class="flex items-start justify-between gap-2 mb-2">
+        <div class="min-w-0 flex-1">
+          <h3 class="font-mono font-semibold text-sm truncate">${escapeHtml(project.name)}</h3>
+          <p class="text-[11px] text-hub-dim font-mono truncate">${escapeHtml(domain)}</p>
+        </div>
+        ${badge ? `<span class="badge border ${badge.cls} shrink-0">${badge.label}</span>` : ""}
+      </div>
+      <div class="flex items-center gap-3 text-[11px] font-mono text-hub-dim mb-4 flex-wrap">
+        <span class="flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-hub-cyan inline-block"></span>
+          ${escapeHtml(framework)}
+        </span>
+        ${project.updatedAt ? `<span>Updated ${timeAgo(new Date(project.updatedAt).toISOString())}</span>` : ""}
+      </div>
+      <div class="flex items-center gap-2 mt-auto">
+        <button class="btnVercelViewDeploys flex-1 text-center text-xs font-medium bg-hub-violet/10 text-hub-violet border border-hub-violet/30 rounded-lg py-2 hover:bg-hub-violet/20 transition-all" data-project-id="${escapeAttr(project.id)}" data-project-name="${escapeAttr(project.name)}">Deployments</button>
+        <button class="btnVercelRedeploy flex-1 text-center text-xs font-medium bg-hub-teal/10 text-hub-teal border border-hub-teal/30 rounded-lg py-2 hover:bg-hub-teal/20 transition-all" data-project-id="${escapeAttr(project.id)}" data-project-name="${escapeAttr(project.name)}">Redeploy</button>
+        <a href="${safeExternalUrl(`https://${domain}`)}" target="_blank" rel="noopener noreferrer" class="w-8 h-8 flex items-center justify-center rounded-lg border border-hub-line hover:bg-white/[0.09] transition-all shrink-0" aria-label="Open live site" title="Open live site">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+        </a>
+      </div>
+    </div>
+  `;
+}
+
+function renderVercelProjectsGrid() {
+  const grid = $("#vercelProjectsGrid");
+  const empty = $("#vercelProjectsEmpty");
+  $("#vercelProjectCount").textContent = `${state.vercel.projects.length} project${state.vercel.projects.length === 1 ? "" : "s"}`;
+  if (state.vercel.projects.length === 0) {
+    grid.classList.add("hidden");
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  grid.classList.remove("hidden");
+  grid.innerHTML = state.vercel.projects.map(vercelProjectCardHtml).join("");
+  $all(".btnVercelViewDeploys", grid).forEach((btn) => {
+    btn.addEventListener("click", () => openVercelDeployments(btn.dataset.projectId, btn.dataset.projectName));
+  });
+  $all(".btnVercelRedeploy", grid).forEach((btn) => {
+    btn.addEventListener("click", () => triggerVercelRedeploy(btn.dataset.projectId, btn.dataset.projectName));
+  });
+}
+
+async function openVercelDeployments(projectId, projectName) {
+  state.vercel.selectedProjectId = projectId;
+  $("#vercelDeploymentsWrap").classList.remove("hidden");
+  $("#vercelDeployProjectName").textContent = projectName;
+  $("#vercelDeploymentsList").classList.add("hidden");
+  $("#vercelDeploymentsEmpty").classList.remove("hidden");
+  $("#vercelDeploymentsEmpty").innerHTML = `<span class="spinner text-hub-teal inline-block" style="width:20px;height:20px;"></span>`;
+  $("#vercelDeploymentsWrap").scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    const data = await vFetch(`/v6/deployments?projectId=${encodeURIComponent(projectId)}&limit=20`);
+    state.vercel.deployments = data?.deployments || [];
+    renderVercelDeploymentsList();
+  } catch (err) {
+    $("#vercelDeploymentsEmpty").innerHTML = `<p class="text-sm text-hub-coral">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function vercelDeploymentRowHtml(dep) {
+  const badge = deployStateBadge(dep.state || dep.readyState);
+  const url = dep.url ? `https://${dep.url}` : null;
+  return `
+    <div class="p-4 sm:p-5 flex items-center gap-3">
+      <span class="badge border ${badge.cls} shrink-0">${badge.label}</span>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-mono truncate">${escapeHtml(dep.name || dep.url || dep.uid)}</p>
+        <p class="text-[11px] text-hub-dim truncate">${dep.meta?.githubCommitMessage ? escapeHtml(dep.meta.githubCommitMessage) : (dep.target ? escapeHtml(dep.target) : "Manual deployment")} · ${timeAgo(new Date(dep.created || dep.createdAt).toISOString())}</p>
+      </div>
+      ${url ? `<a href="${safeExternalUrl(url)}" target="_blank" rel="noopener noreferrer" class="text-xs text-hub-teal font-medium hover:underline shrink-0">Visit →</a>` : ""}
+    </div>
+  `;
+}
+
+function renderVercelDeploymentsList() {
+  const list = $("#vercelDeploymentsList");
+  const empty = $("#vercelDeploymentsEmpty");
+  if (state.vercel.deployments.length === 0) {
+    list.classList.add("hidden");
+    empty.classList.remove("hidden");
+    empty.innerHTML = `<p class="text-sm text-hub-dim">No deployments yet for this project.</p>`;
+    return;
+  }
+  empty.classList.add("hidden");
+  list.classList.remove("hidden");
+  list.innerHTML = state.vercel.deployments.map(vercelDeploymentRowHtml).join("");
+}
+
+async function triggerVercelRedeploy(projectId, projectName) {
+  try {
+    const deps = await vFetch(`/v6/deployments?projectId=${encodeURIComponent(projectId)}&limit=1`);
+    const latest = deps?.deployments?.[0];
+    if (!latest) {
+      toast("No previous deployment found to redeploy from. Use New Deployment instead.", "info");
+      return;
+    }
+    toast(`Redeploying ${projectName}…`, "info", 2500);
+    await vFetch("/v13/deployments", {
+      method: "POST",
+      body: JSON.stringify({
+        name: projectName,
+        deploymentId: latest.uid,
+        target: latest.target || "production",
+      }),
+    });
+    logActivity("deploy", `Redeployed ${projectName}`, "Triggered via Vercel");
+    toast(`Redeploy triggered for ${projectName}`, "success");
+    if (state.vercel.selectedProjectId === projectId) openVercelDeployments(projectId, projectName);
+  } catch (err) {
+    toast(err.message, "error");
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -634,6 +1013,9 @@ function switchView(viewName) {
   if (viewName === "account" && state.token) {
     loadGistsList();
     loadSshKeysList();
+  }
+  if (viewName === "deploy" && state.vercel.token) {
+    refreshVercelProjects();
   }
 }
 
@@ -1013,6 +1395,10 @@ function openRepoOptionsModal(fullName) {
           <svg class="w-4 h-4 text-hub-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
           Upload files here
         </button>
+        <button id="btnGoDeployHere" type="button" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.02] border border-hub-line hover:bg-white/[0.05] transition-all text-sm font-medium text-left">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 19h20L12 2z"/></svg>
+          Deploy to Vercel
+        </button>
         <button id="btnToggleVisibility" type="button" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.02] border border-hub-line hover:bg-white/[0.05] transition-all text-sm font-medium text-left">
           <svg class="w-4 h-4 text-hub-violet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
           Make ${repo.private ? "Public" : "Private"}
@@ -1043,6 +1429,22 @@ function openRepoOptionsModal(fullName) {
         closeModal();
         switchView("upload");
         $("#targetRepoSelect").value = repo.full_name;
+      };
+      $("#btnGoDeployHere", root).onclick = () => {
+        closeModal();
+        switchView("deploy");
+        if (!state.vercel.token) {
+          openVercelTokenModal();
+        } else {
+          openNewVercelDeployModal();
+          setTimeout(() => {
+            const sel = $("#vdRepoSelect");
+            if (sel) {
+              sel.value = repo.full_name;
+              sel.dispatchEvent(new Event("change"));
+            }
+          }, 0);
+        }
       };
       $("#btnToggleVisibility", root).onclick = async () => {
         try {
@@ -1848,6 +2250,198 @@ function openTokenModal() {
       if (connected) {
         $("#btnLogoutFromModal", root).onclick = logout;
       }
+    },
+  });
+}
+
+function openVercelTokenModal() {
+  const connected = !!state.vercel.token;
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">${connected ? "Manage Vercel Token" : "Connect Vercel"}</h2>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      ${connected ? `
+        <div class="flex items-center gap-3 bg-white/[0.02] border border-hub-line rounded-xl p-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-white/[0.08] flex items-center justify-center ring-1 ring-hub-line shrink-0">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 19h20L12 2z"/></svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium truncate">${escapeHtml(state.vercel.user.name || state.vercel.user.username || state.vercel.user.email)}</p>
+            <p class="text-xs text-hub-dim font-mono truncate">${state.vercel.user.username ? "@" + escapeHtml(state.vercel.user.username) : escapeHtml(state.vercel.user.email || "")}</p>
+          </div>
+          <span class="ml-auto badge badge-public shrink-0">Connected</span>
+        </div>
+        <p class="text-xs text-hub-dim mb-4 leading-relaxed">Your token is stored only in this browser's local storage and sent only to api.vercel.com. To switch accounts, connect a new token below, or disconnect.</p>
+      ` : `
+        <p class="text-sm text-hub-dim mb-4 leading-relaxed">Paste a Vercel API token. Don't have one? <a href="https://vercel.com/account/tokens" target="_blank" rel="noopener noreferrer" class="text-hub-teal hover:underline">Create one →</a></p>
+      `}
+
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">API Token</label>
+      <div class="relative mb-3">
+        <input id="vercelTokenInput" type="password" placeholder="vercel_xxxxxxxxxxxxxxxxxxxx" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-3 pr-11 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        <button id="btnToggleVercelTokenVis" type="button" class="absolute right-3 top-1/2 -translate-y-1/2 text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Team ID <span class="normal-case text-hub-dim/70">(optional, for team-scoped tokens)</span></label>
+      <input id="vercelTeamInput" type="text" placeholder="team_xxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false" value="${escapeAttr(state.vercel.teamId || "")}" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-1 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+
+      <p class="text-[11px] text-hub-dim mb-4 mt-2 flex items-center gap-1.5">
+        <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        Sent only to api.vercel.com over HTTPS. Stored in this browser's local storage — see Security Center for what that means.
+      </p>
+      <button id="btnSubmitVercelToken" type="button" class="w-full flex items-center justify-center gap-2 bg-white text-black font-semibold py-3.5 rounded-xl hover:brightness-95 active:scale-95 transition-all">
+        <span id="submitVercelTokenText">${connected ? "Switch Token" : "Connect"}</span>
+      </button>
+
+      ${connected ? `
+        <button id="btnVercelLogoutFromModal" type="button" class="w-full mt-2.5 flex items-center justify-center gap-2 text-hub-coral text-sm font-medium py-3 rounded-xl hover:bg-hub-coral/5 transition-all">
+          Disconnect Vercel
+        </button>
+      ` : ""}
+    </div>
+  `;
+
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      $("#vercelTokenInput", root).focus();
+      $("#btnToggleVercelTokenVis", root).onclick = () => {
+        const input = $("#vercelTokenInput", root);
+        input.type = input.type === "password" ? "text" : "password";
+      };
+      $("#vercelTokenInput", root).addEventListener("keydown", (e) => {
+        if (e.key === "Enter") $("#btnSubmitVercelToken", root).click();
+      });
+      $("#btnSubmitVercelToken", root).onclick = async () => {
+        const val = $("#vercelTokenInput", root).value;
+        const teamVal = $("#vercelTeamInput", root).value;
+        const btn = $("#btnSubmitVercelToken", root);
+        const btnText = $("#submitVercelTokenText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+        const ok = await connectWithVercelToken(val, teamVal);
+        if (ok) {
+          closeModal();
+        } else {
+          btn.disabled = false;
+          btnText.textContent = connected ? "Switch Token" : "Connect";
+        }
+      };
+      if (connected) {
+        $("#btnVercelLogoutFromModal", root).onclick = vercelLogout;
+      }
+    },
+  });
+}
+
+function openNewVercelDeployModal() {
+  if (state.repos.length === 0 && !state.token) {
+    // GitHub not connected — still allow deploying an existing/new project by name.
+  }
+  const repoOptions = state.repos.map((r) => `<option value="${escapeAttr(r.full_name)}">${escapeHtml(r.full_name)}</option>`).join("");
+  const frameworkOptions = VERCEL_FRAMEWORKS.map((f) => `<option value="${escapeAttr(f.id || "")}">${escapeHtml(f.label)}</option>`).join("");
+
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="font-mono font-bold text-lg">New Deployment</h2>
+        <button id="mClose" type="button" class="text-hub-dim hover:text-hub-ink transition-colors">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      ${state.repos.length > 0 ? `
+        <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">GitHub repository</label>
+        <select id="vdRepoSelect" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+          <option value="">— select repository —</option>
+          ${repoOptions}
+        </select>
+      ` : `
+        <p class="text-xs text-hub-amber mb-3 leading-relaxed">Connect GitHub first to deploy directly from a repository. You can still name a new project below and link a repo to it later from Vercel's dashboard.</p>
+      `}
+
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Project name</label>
+      <input id="vdProjectName" type="text" placeholder="my-app" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Framework <span class="normal-case text-hub-dim/70">(auto-detected if left as-is)</span></label>
+      <select id="vdFramework" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+        ${frameworkOptions}
+      </select>
+
+      <label class="text-xs font-mono uppercase tracking-wider text-hub-dim mb-1.5 block">Branch</label>
+      <input id="vdBranch" type="text" placeholder="main" value="main" autocomplete="off" spellcheck="false" class="w-full bg-hub-deep border border-hub-line rounded-xl px-4 py-2.5 text-sm font-mono mb-4 focus:outline-none focus:ring-2 focus:ring-hub-teal/50">
+
+      <button id="btnSubmitVercelDeploy" type="button" class="w-full flex items-center justify-center gap-2 bg-hub-teal text-hub-bg font-semibold py-3.5 rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-hub-teal/20">
+        <span id="submitVercelDeployText">Deploy</span>
+      </button>
+    </div>
+  `;
+
+  openModal(html, {
+    onMount: (root) => {
+      $("#mClose", root).onclick = closeModal;
+      const repoSelect = $("#vdRepoSelect", root);
+      if (repoSelect) {
+        repoSelect.addEventListener("change", () => {
+          const val = repoSelect.value;
+          if (val && !$("#vdProjectName", root).value) {
+            $("#vdProjectName", root).value = val.split("/")[1] || val;
+          }
+        });
+      }
+      $("#btnSubmitVercelDeploy", root).onclick = async () => {
+        const projectName = $("#vdProjectName", root).value.trim();
+        const framework = $("#vdFramework", root).value || null;
+        const branch = $("#vdBranch", root).value.trim() || "main";
+        const repoFullName = repoSelect ? repoSelect.value : "";
+
+        if (!projectName) {
+          toast("Enter a project name", "error");
+          return;
+        }
+        if (!/^[a-z0-9._-]+$/i.test(projectName)) {
+          toast("Project name can only contain letters, numbers, dots, underscores and hyphens", "error");
+          return;
+        }
+
+        const btn = $("#btnSubmitVercelDeploy", root);
+        const btnText = $("#submitVercelDeployText", root);
+        btn.disabled = true;
+        btnText.innerHTML = `<span class="spinner"></span>`;
+
+        try {
+          const body = {
+            name: projectName,
+            target: "production",
+            ...(framework ? { framework } : {}),
+          };
+          if (repoFullName) {
+            const [owner, repoName] = repoFullName.split("/");
+            body.gitSource = { type: "github", org: owner, repo: repoName, ref: branch };
+          } else {
+            throw new Error("Select a GitHub repository to deploy from, or connect one in Vercel's dashboard first.");
+          }
+          await vFetch("/v13/deployments", {
+            method: "POST",
+            body: JSON.stringify(body),
+          });
+          logActivity("deploy", `Deployed ${projectName} to Vercel`, framework ? frameworkLabel(framework) : "Framework auto-detected");
+          toast(`Deployment started for ${projectName}`, "success");
+          closeModal();
+          await refreshVercelProjects();
+        } catch (err) {
+          toast(err.message, "error");
+          btn.disabled = false;
+          btnText.textContent = "Deploy";
+        }
+      };
     },
   });
 }
@@ -3989,6 +4583,21 @@ function bindEvents() {
   $("#btnRevokeLocalToken").addEventListener("click", () => {
     openWipeTokenConfirmModal();
   });
+  $("#btnWipeVercelToken").addEventListener("click", () => {
+    openWipeVercelTokenConfirmModal();
+  });
+
+  // Deploy (Vercel)
+  $("#btnConnectVercel").addEventListener("click", openVercelTokenModal);
+  $("#btnVercelSettings").addEventListener("click", openVercelTokenModal);
+  $("#btnNewVercelDeploy").addEventListener("click", openNewVercelDeployModal);
+  $("#btnRefreshVercel").addEventListener("click", () => {
+    if (state.vercel.token) refreshVercelProjects();
+  });
+  $("#btnCloseDeployments").addEventListener("click", () => {
+    $("#vercelDeploymentsWrap").classList.add("hidden");
+    state.vercel.selectedProjectId = "";
+  });
 
   // Upload pickers — each button triggers only its own hidden input
   $("#btnPickFiles").addEventListener("click", () => $("#fileInputMulti").click());
@@ -4082,6 +4691,30 @@ function openWipeTokenConfirmModal() {
   });
 }
 
+function openWipeVercelTokenConfirmModal() {
+  const html = `
+    <div class="p-5 sm:p-6">
+      <div class="w-12 h-12 rounded-full bg-hub-coral/15 flex items-center justify-center mb-4">
+        <svg class="w-6 h-6 text-hub-coral" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+      </div>
+      <h2 class="font-mono font-bold text-lg mb-1.5">Wipe Vercel token from this browser?</h2>
+      <p class="text-sm text-hub-dim mb-5 leading-relaxed">This removes the token from local storage and disconnects Vercel on this device. This does not revoke the token on Vercel — for that, visit your <a href="https://vercel.com/account/tokens" target="_blank" rel="noopener noreferrer" class="text-hub-teal hover:underline">Vercel token settings</a>.</p>
+      <div class="flex gap-3">
+        <button id="mCancel" type="button" class="flex-1 border border-hub-line py-3 rounded-xl text-sm font-medium hover:bg-white/[0.05] transition-all">Cancel</button>
+        <button id="btnConfirmWipeVercel" type="button" class="flex-1 bg-hub-coral text-white font-semibold py-3 rounded-xl hover:brightness-110 transition-all text-sm">Wipe Token</button>
+      </div>
+    </div>
+  `;
+  openModal(html, {
+    onMount: (root) => {
+      $("#mCancel", root).onclick = closeModal;
+      $("#btnConfirmWipeVercel", root).onclick = () => {
+        vercelLogout();
+      };
+    },
+  });
+}
+
 /* ---------------------------------------------------------------------- */
 /* Init                                                                    */
 /* ---------------------------------------------------------------------- */
@@ -4093,6 +4726,7 @@ async function init() {
   renderActivity();
   renderAuthUI();
   await tryAutoConnect();
+  await tryAutoConnectVercel();
 }
 
 document.addEventListener("DOMContentLoaded", init);
