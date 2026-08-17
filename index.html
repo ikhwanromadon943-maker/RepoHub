@@ -6,6 +6,7 @@
 <title>RepoHub — GitHub Control Deck</title>
 <meta name="description" content="RepoHub: upload folders, upload ZIP archives, browse files, manage issues and branches, and control your GitHub repositories from one secure dashboard.">
 <meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.github.com https://api.vercel.com https://vercel.com; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -100,6 +101,7 @@
         <button data-view="repos" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Repositories</button>
         <button data-view="issues" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Issues</button>
         <button data-view="collaborate" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Collaborate</button>
+        <button data-view="deploy" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Deploy</button>
         <button data-view="account" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Account</button>
         <button data-view="activity" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Activity</button>
         <button data-view="security" class="nav-link px-3.5 py-1.5 rounded-full text-sm font-medium transition-all">Security</button>
@@ -206,6 +208,10 @@
       <button data-view="collaborate" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Collaborate
+      </button>
+      <button data-view="deploy" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 19h20L12 2z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>
+        Deploy
       </button>
       <button data-view="account" class="nav-link-mobile w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -731,6 +737,95 @@
     </div>
   </section>
 
+  <!-- ---------- DEPLOY (Vercel) ---------- -->
+  <section id="view-deploy" class="view-panel hidden max-w-6xl mx-auto px-3 sm:px-6 lg:px-8">
+    <div class="mb-5 sm:mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <div class="text-xs font-mono text-hub-teal mb-1">DEPLOY</div>
+        <h1 class="font-mono font-bold text-2xl sm:text-3xl tracking-tight">Vercel Deployments</h1>
+        <p class="text-sm text-hub-dim mt-1">Ship any repo to Vercel, trigger redeploys, and watch build status — any framework, auto-detected.</p>
+      </div>
+      <div id="vercelConnStatusPill" class="hidden sm:flex items-center gap-2 pl-3 pr-1 py-1 rounded-full border border-hub-line bg-white/[0.03] backdrop-blur-xl shrink-0">
+        <span class="relative flex h-2 w-2">
+          <span id="vercelConnDot" class="absolute inline-flex h-full w-full rounded-full bg-hub-coral"></span>
+        </span>
+        <span id="vercelConnText" class="text-xs font-mono text-hub-dim">Vercel not connected</span>
+      </div>
+    </div>
+
+    <div id="vercelGate" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-8 text-center">
+      <div class="w-12 h-12 rounded-2xl bg-white/[0.06] flex items-center justify-center mx-auto mb-4">
+        <svg class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 19h20L12 2z"/></svg>
+      </div>
+      <p class="text-sm font-medium mb-1">Connect your Vercel account</p>
+      <p class="text-xs text-hub-dim mb-4 max-w-sm mx-auto leading-relaxed">Paste a Vercel API token to list projects, deploy from any GitHub repo, and redeploy with one click. Works with Next.js, Vite, Nuxt, SvelteKit, Astro, Remix, Gatsby, plain static sites, and more.</p>
+      <button id="btnConnectVercel" type="button" class="inline-flex items-center gap-2 bg-white text-black font-semibold px-5 py-2.5 rounded-xl text-sm hover:brightness-95 active:scale-95 transition-all">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 19h20L12 2z"/></svg>
+        Connect Vercel
+      </button>
+    </div>
+
+    <div id="vercelContent" class="hidden">
+      <!-- Framework support strip -->
+      <div class="flex items-center gap-2 flex-wrap mb-4 text-[11px] font-mono text-hub-dim">
+        <span class="text-hub-dim/70">Auto-detects:</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">Next.js</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">Vite</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">Nuxt</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">SvelteKit</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">Astro</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">Remix</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">Gatsby</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">CRA</span>
+        <span class="px-2 py-0.5 rounded-full border border-hub-line bg-white/[0.02]">Static / Other</span>
+      </div>
+
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-3 sm:p-4 mb-4 flex flex-col sm:flex-row gap-2.5 sm:items-center">
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+          <img id="vercelUserAvatar" src="" alt="" class="w-8 h-8 rounded-full ring-1 ring-hub-line shrink-0 hidden">
+          <div class="min-w-0">
+            <p id="vercelUserName" class="text-sm font-medium truncate">—</p>
+            <p id="vercelUserScope" class="text-[11px] text-hub-dim font-mono truncate">—</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button id="btnNewVercelDeploy" type="button" class="flex items-center gap-1.5 bg-hub-teal text-hub-bg font-semibold px-4 py-2.5 rounded-xl text-sm hover:brightness-110 transition-all">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+            New Deployment
+          </button>
+          <button id="btnRefreshVercel" type="button" class="w-9 h-9 flex items-center justify-center rounded-xl border border-hub-line hover:bg-white/[0.06] transition-all shrink-0" aria-label="Refresh">
+            <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          </button>
+          <button id="btnVercelSettings" type="button" class="w-9 h-9 flex items-center justify-center rounded-xl border border-hub-line hover:bg-white/[0.06] transition-all shrink-0" aria-label="Vercel token settings">
+            <svg class="w-4 h-4 text-hub-dim" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.23.5.66.86 1.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Projects grid -->
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-mono font-semibold text-sm">Projects</h2>
+        <span id="vercelProjectCount" class="text-xs text-hub-dim font-mono">0 projects</span>
+      </div>
+      <div id="vercelProjectsEmpty" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-10 text-center">
+        <p class="text-sm text-hub-dim">No Vercel projects yet. Create one from a GitHub repo or an upload.</p>
+      </div>
+      <div id="vercelProjectsGrid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8"></div>
+
+      <!-- Deployments for selected project -->
+      <div id="vercelDeploymentsWrap" class="hidden">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-mono font-semibold text-sm">Deployments — <span id="vercelDeployProjectName" class="text-hub-teal"></span></h2>
+          <button id="btnCloseDeployments" class="text-xs text-hub-dim hover:text-hub-ink transition-colors">Close ✕</button>
+        </div>
+        <div id="vercelDeploymentsEmpty" class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-10 text-center">
+          <p class="text-sm text-hub-dim">No deployments yet for this project.</p>
+        </div>
+        <div id="vercelDeploymentsList" class="hidden rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl divide-y divide-hub-line overflow-hidden"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ---------- ACTIVITY ---------- -->
   <section id="view-activity" class="view-panel hidden max-w-4xl mx-auto px-3 sm:px-6 lg:px-8">
     <div class="mb-6 sm:mb-8">
@@ -854,6 +949,34 @@
         </div>
       </div>
 
+      <div class="rounded-2xl border border-hub-line bg-white/[0.02] backdrop-blur-xl p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-white/[0.08] flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 19h20L12 2z"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-sm mb-1">Vercel token storage</h3>
+            <p class="text-xs text-hub-dim leading-relaxed">Your Vercel API token is stored client-side, in this browser's local storage, and sent only to <code class="text-hub-cyan bg-white/5 px-1 rounded font-mono">api.vercel.com</code> over HTTPS. Because RepoHub has no backend, this token — like your GitHub token — is readable by anyone with access to this browser or device (e.g. via DevTools). Prefer a scoped token limited to the specific projects you deploy here, and revoke it immediately if this device is shared or lost.</p>
+            <button id="btnWipeVercelToken" type="button" class="mt-3 flex items-center gap-2 border border-hub-coral/30 text-hub-coral font-medium px-3.5 py-2 rounded-xl text-xs hover:bg-hub-coral/10 transition-all">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+              Wipe Vercel token from this browser
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-hub-amber/20 bg-hub-amber/5 backdrop-blur-xl p-5 sm:p-6">
+        <div class="flex items-start gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-hub-amber/15 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-hub-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-sm mb-1">On "hiding" source code</h3>
+            <p class="text-xs text-hub-dim leading-relaxed">A browser must receive a page's HTML, CSS, and JavaScript to render it — that transfer can't be prevented by anything running in the page itself. Tricks like disabling right-click or DevTools only inconvenience casual users; they don't stop anyone who opens the Network tab, uses <code class="text-hub-cyan bg-white/5 px-1 rounded font-mono">view-source:</code>, or fetches the URL directly. RepoHub doesn't ship fake "source protection" for this reason. The real mitigation is architectural: never put secrets in client-side code, put sensitive logic behind an authenticated backend, and treat anything sent to the browser as public.</p>
+          </div>
+        </div>
+      </div>
+
       <div class="rounded-2xl border border-hub-coral/20 bg-hub-coral/5 backdrop-blur-xl p-5 sm:p-6">
         <div class="flex items-start gap-3.5">
           <div class="w-10 h-10 rounded-xl bg-hub-coral/15 flex items-center justify-center shrink-0">
@@ -885,6 +1008,10 @@
           <div>
             <p class="text-[11px] text-hub-dim uppercase font-mono tracking-wide mb-0.5">Token scope check</p>
             <p id="secScopeStatus" class="font-mono font-semibold">—</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-hub-dim uppercase font-mono tracking-wide mb-0.5">Vercel connection</p>
+            <p id="secVercelStatus" class="font-mono font-semibold">Not connected</p>
           </div>
         </div>
         <button id="btnRevokeLocalToken" class="mt-4 w-full sm:w-auto flex items-center justify-center gap-2 border border-hub-coral/30 text-hub-coral font-medium px-4 py-2.5 rounded-xl text-sm hover:bg-hub-coral/10 transition-all">
